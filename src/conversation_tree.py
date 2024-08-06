@@ -25,9 +25,12 @@ class ConversationTree:
         self.current_node.add_child(new_node)
         self.current_node = new_node
 
-    def fork(self) -> None:
+    def fork(self, branch_name: str) -> None:
         """
         Creates a new branch in the conversation.
+
+        Args:
+            branch_name (str): The name of the new branch.
         """
         fork_node = ConversationNode(content="<FORK>", role="system")
         self.current_node.add_child(fork_node)
@@ -39,19 +42,20 @@ class ConversationTree:
         """
         # Find the fork node
         fork_node = self.current_node
-        while fork_node.content != "<FORK>" and not fork_node.is_root():
+        while fork_node.content != "<FORK>" and fork_node.parent:
             fork_node = fork_node.parent
 
-        if fork_node.is_root():
+        if fork_node.content != "<FORK>":
             raise ValueError("No fork found to merge")
 
         # Summarize the forked conversation
         summary = self._summarize_fork(fork_node)
 
-        # Create a merge node in the main conversation
-        merge_node = ConversationNode(content=f"MERGE: {summary}", role="system")
-        fork_node.parent.add_child(merge_node)
-        self.current_node = merge_node
+        # Move back to the main conversation
+        self.current_node = fork_node.parent
+        
+        # Add the summary as a system message
+        self.add_message(f"MERGE SUMMARY: {summary}", "system")
 
     def _summarize_fork(self, fork_node: ConversationNode) -> str:
         """
@@ -99,6 +103,10 @@ class ConversationTree:
             str: Claude's response.
         """
         conversation_history = self.get_conversation_history()
+        
+        # Add the new user message to the tree before sending to Claude
+        self.add_message(message, "user")
+        
         response = self.claude_client.get_response(message, conversation_history)
         self.add_message(response, "assistant")
         return response
@@ -112,7 +120,7 @@ class ConversationTree:
         """
         history = []
         current = self.current_node
-        while not current.is_root():
+        while current.parent:
             if current.role in ["user", "assistant"]:
                 history.insert(0, {"role": current.role, "content": current.content})
             current = current.parent
@@ -132,3 +140,22 @@ class ConversationTree:
         print("  " * level + str(node))
         for child in node.children:
             self.print_tree(child, level + 1)
+
+    def get_flat_conversation(self) -> List[str]:
+        messages = []
+        current = self.root
+        while current:
+            messages.append(f"{current.role}: {current.content}")
+            if current.children:
+                current = current.children[0]
+            else:
+                break
+        return messages
+
+    def is_in_fork(self) -> bool:
+        current = self.current_node
+        while current.parent:
+            if current.content == "<FORK>":
+                return True
+            current = current.parent
+        return False
