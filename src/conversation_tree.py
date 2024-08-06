@@ -25,7 +25,7 @@ class ConversationTree:
         self.current_node.add_child(new_node)
         self.current_node = new_node
 
-    def fork(self, branch_name: str) -> None:
+    def fork(self) -> None:
         """
         Creates a new branch in the conversation.
 
@@ -55,6 +55,7 @@ class ConversationTree:
         self.current_node = fork_node.parent
         
         # Add the summary as a system message
+        print("MERGE SUMMARY: ", summary)
         self.add_message(f"MERGE SUMMARY: {summary}", "system")
 
     def _summarize_fork(self, fork_node: ConversationNode) -> str:
@@ -68,8 +69,18 @@ class ConversationTree:
             str: A summary of the forked conversation.
         """
         messages = self._collect_messages(fork_node)
-        summary_prompt = "Please summarize the key points of the following conversation:\n\n" + "\n".join(messages)
-        return self.claude_client.get_response(summary_prompt)
+        if not messages:
+            return "The forked conversation was empty."
+
+        print(messages)
+
+        try:
+            summary = self.claude_client.summarize(messages)
+            print("SUMMARY: ", summary)
+            return summary
+        except Exception as e:
+            print(f"Error while summarizing fork: {e}")
+            return "Unable to summarize the forked conversation due to an error."
 
     def _collect_messages(self, node: ConversationNode) -> List[str]:
         """
@@ -83,13 +94,11 @@ class ConversationTree:
         """
         messages = []
         current = node
-        while current:
-            if current.role != "system":
-                messages.append(f"{current.role}: {current.content}")
-            if current.children:
-                current = current.children[0]  # Assuming linear conversation in a fork
-            else:
-                break
+        while current and current.children:
+            child = current.children[0]
+            if child.role != "system":
+                messages.append(f"{child.role}: {child.content}")
+            current = child
         return messages
 
     def chat_with_claude(self, message: str) -> str:
@@ -159,3 +168,25 @@ class ConversationTree:
                 return True
             current = current.parent
         return False
+    
+    def generate_ascii_tree(self) -> str:
+        """
+        Generates an ASCII representation of the conversation tree.
+
+        Returns:
+            str: ASCII tree representing the conversation structure.
+        """
+        def tree_lines(node, prefix="", is_last=True):
+            lines = []
+            content = (node.content[:30] + '...') if len(node.content) > 30 else node.content
+            lines.append(f"{prefix}{'└── ' if is_last else '├── '}[{node.role}] {content}")
+            
+            prefix += "    " if is_last else "│   "
+            child_count = len(node.children)
+            
+            for i, child in enumerate(node.children):
+                lines.extend(tree_lines(child, prefix, i == child_count - 1))
+            
+            return lines
+
+        return "\n".join(tree_lines(self.root))

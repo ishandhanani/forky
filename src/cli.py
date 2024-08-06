@@ -5,7 +5,7 @@ class ForkyCLI:
         self.tree = ConversationTree()
 
     def chat(self):
-        print("Enter your message (type 'quit' to exit, '/status' for conversation state, '/fork' to create a fork, '/merge' to merge a fork):")
+        print("Enter your message (type 'quit' to exit, '/status' for conversation state, '/fork' to create a fork, '/merge' to merge a fork, '/visualize' to see the conversation tree, '/history' to view full conversation history):")
         while True:
             user_input = input("You: ")
             if user_input.lower() == 'quit':
@@ -21,9 +21,27 @@ class ForkyCLI:
                     print("Merged the fork back into the main conversation. You are now in the main conversation.")
                 except ValueError as e:
                     print(f"Error: {e}")
+            elif user_input.lower() == '/visualize':
+                self.visualize_tree()
+            elif user_input.lower() == '/history':
+                self.show_full_history()
             else:
                 response = self.tree.chat_with_claude(user_input)
                 print(f"Claude: {response}")
+
+    def show_full_history(self):
+        history = self.tree.get_conversation_history()
+        print("\nFull Conversation History:")
+        for message in history:
+            content = message['content']
+            if len(content) > 50:
+                content = content[:47] + "..."
+            print(f"{message['role'].capitalize()}: {content}")
+
+    def visualize_tree(self):
+        ascii_tree = self.tree.generate_ascii_tree()
+        print("\nConversation Tree Visualization:")
+        print(ascii_tree)
 
     def show_status(self):
         print("\nCurrent conversation state:")

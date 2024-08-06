@@ -42,5 +42,5 @@ class ClaudeClient:
         return prepared_messages
 
     def summarize(self, conversation: List[str]) -> str:
-        summary_prompt = "Please summarize the key points of the following conversation:\n\n" + "\n".join(conversation)
+        summary_prompt = "Create a 1-2 sentance summary of the following conversation so that it is easy to understand:\n\n" + "\n".join(conversation)
         return self.get_response(summary_prompt)
