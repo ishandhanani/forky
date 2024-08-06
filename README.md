@@ -66,6 +66,10 @@ Contributions are welcome! Please feel free to submit a Pull Request. Here are s
 - [ ] Reset: Implement the ability to move the conversation back to a previous state.
 - [ ] LLMs: Support other LLM models besides Claude
 
+## Open questions 
+
+- [ ] Should each node should be a user/assistant exchnage, not just a single message
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
