@@ -13,14 +13,25 @@ class ClaudeClient:
         self.client = Anthropic(api_key=api_key)
         self.model = "claude-3-5-sonnet-20240620"
 
-    def get_response(self, message: str, conversation_history: List[Dict[str, str]] = None) -> str:
-        messages = self._prepare_messages(message, conversation_history)
+    def get_response(self, message: str, conversation_history: List[Dict[str, str]] = []) -> str:
+        """
+        Sends a message to Claude and gets a response.
 
+        Args:
+            message (str): The message to send to Claude.
+            conversation_history (List[Dict[str, str]]): Previous conversation history.
+
+        Returns:
+            str: Claude's response.
+        """
+        system_message = "You are Claude, an AI assistant created by Anthropic to be helpful, harmless, and honest."
+        
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=15,
-                messages=messages
+                max_tokens=25,
+                system=system_message,
+                messages=conversation_history + [{"role": "user", "content": message}]
             )
             return response.content[0].text
         except anthropic.APIError as e:

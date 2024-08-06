@@ -44,19 +44,21 @@ class ConversationTree:
         fork_node = self.current_node
         while fork_node.content != "<FORK>" and fork_node.parent:
             fork_node = fork_node.parent
-
         if fork_node.content != "<FORK>":
             raise ValueError("No fork found to merge")
-
+        
         # Summarize the forked conversation
         summary = self._summarize_fork(fork_node)
-
+        
         # Move back to the main conversation
         self.current_node = fork_node.parent
         
-        # Add the summary as a system message
-        print("MERGE SUMMARY: ", summary)
-        self.add_message(f"MERGE SUMMARY: {summary}", "system")
+        # Add the summary as a user message and an assistant response
+        merge_user_message = "Summarize our conversation in the recent fork."
+        merge_assistant_message = f"Certainly! Here's a summary of our recent conversation:\n\n{summary}"
+        
+        self.add_message(merge_user_message, "user")
+        self.add_message(merge_assistant_message, "assistant")
 
     def _summarize_fork(self, fork_node: ConversationNode) -> str:
         """
@@ -71,8 +73,6 @@ class ConversationTree:
         messages = self._collect_messages(fork_node)
         if not messages:
             return "The forked conversation was empty."
-
-        print(messages)
 
         try:
             summary = self.claude_client.summarize(messages)
@@ -103,7 +103,7 @@ class ConversationTree:
 
     def chat_with_claude(self, message: str) -> str:
         """
-        Sends a message to Claude and gets a response.
+        Sends a message to Claude and gets a response, using the full conversation history.
 
         Args:
             message (str): The message to send to Claude.
@@ -112,27 +112,30 @@ class ConversationTree:
             str: Claude's response.
         """
         conversation_history = self.get_conversation_history()
-        
-        # Add the new user message to the tree before sending to Claude
         self.add_message(message, "user")
-        
         response = self.claude_client.get_response(message, conversation_history)
         self.add_message(response, "assistant")
         return response
 
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """
-        Retrieves the current conversation history.
+        Retrieves the conversation history, excluding system messages.
 
         Returns:
             List[Dict[str, str]]: A list of dictionaries representing the conversation history.
         """
         history = []
-        current = self.current_node
-        while current.parent:
-            if current.role in ["user", "assistant"]:
-                history.insert(0, {"role": current.role, "content": current.content})
-            current = current.parent
+        
+        def traverse_tree(node):
+            if node.role in ["user", "assistant"]:
+                history.append({"role": node.role, "content": node.content})
+            elif node.role == "system" and node.content.startswith("MERGE SUMMARY:"):
+                # Include merge summaries as user messages
+                history.append({"role": "user", "content": node.content})
+            for child in node.children:
+                traverse_tree(child)
+
+        traverse_tree(self.root)
         return history
 
     def print_tree(self, node: Optional[ConversationNode] = None, level: int = 0) -> None:
