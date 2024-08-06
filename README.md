@@ -1,66 +1,71 @@
-# Forky
+# Forky: Git-style Conversation Structure for LLMs 
 
-Forky is a Python library for managing complex conversations with AI models in a Git-style tree structure. It allows for non-linear conversations, including branching, merging, and easy history traversal.
+Forky is a command-line interface (CLI) tool that implements a git-style conversation structure for interactions with the Claude API. It allows users to create, manage, and navigate through branching conversations, providing a unique way to explore different conversation paths with an AI assistant.
 
 ## Features
 
-- Git-style conversation management
-- Branching (forking) conversations
-- Merging conversation branches
-- Easy history traversal
-- Integration with Claude API
+- **Conversation Tree Structure**: Manage conversations in a tree-like structure, allowing for branching and merging of dialogue paths.
+- **Forking**: Create new branches in the conversation to explore alternative dialogue paths.
+- **Merging**: Combine forked conversations back into the main thread with automatic summarization.
+- **CLI Interface**: Easy-to-use command-line interface for interacting with the conversation tree.
+- **Visualization**: ASCII-based tree visualization of the conversation structure.
+- **History Tracking**: View and manage the full conversation history.
 
 ## Installation
 
-```bash
-git clone https://github.com/ishandhanani/forky.git
-cd conversation-tree
-pip install -r requirements.txt
-```
+1. Clone the repository:
+   ```
+   git clone https://github.com/ishandhanani/forky.git
+   cd forky
+   ```
+
+2. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+3. Set up your Anthropic API key:
+   - Create a `.env` file in the project root.
+   - Add your API key: `ANTHROPIC_API_KEY=your_api_key_here`
 
 ## Usage
 
-Here's a basic example of how to use Forky
+Run the CLI application:
 
-```python
-from src.conversation_tree import ConversationTree
-
-tree = ConversationTree()
-
-# Start a conversation
-tree.add_message("Hello, Claude!", "user")
-response = tree.chat_with_claude("Hello, Claude!")
-print(f"Claude: {response}")
-
-# Fork the conversation
-tree.fork()
-
-# Continue in the forked branch
-tree.add_message("What's the weather like?", "user")
-response = tree.chat_with_claude("What's the weather like?")
-print(f"Claude: {response}")
-
-# Merge the fork back to main conversation
-tree.merge()
-
-# Continue in the main conversation
-tree.add_message("Tell me a joke", "user")
-response = tree.chat_with_claude("Tell me a joke")
-print(f"Claude: {response}")
+```
+python -m forky.cli
 ```
 
-## Architecture
+Available commands:
+- Type your message to chat with Claude
+- `/fork`: Create a new branch in the conversation
+- `/merge`: Merge the current branch back into the main conversation
+- `/status`: View the current conversation state
+- `/visualize`: See an ASCII representation of the conversation tree
+- `/history`: View the full conversation history
+- `quit`: Exit the application
 
-The Conversation Tree is built around two main classes:
+## Project Structure
 
-1. `ConversationNode`: Represents a single message in the conversation.
-2. `ConversationTree`: Manages the overall structure of the conversation.
+- `api_client.py`: Handles communication with the Claude API
+- `cli.py`: Implements the command-line interface
+- `conversation_node.py`: Defines the ConversationNode class for tree structure
+- `conversation_tree.py`: Manages the overall conversation tree and operations
 
-### Conversation Structure
+## Contributing
 
-<antArtifact identifier="readme-basic-conversation-diagram" type="application/vnd.ant.mermaid" title="Basic Conversation Structure">
-graph TD
-    A[Root] --> B[User: Hello]
-    B --> C[Assistant: Hi there!]
-    C --> D[User: How are you?]
-    D --> E[Assistant: I'm doing well, thank you!]
+Contributions are welcome! Please feel free to submit a Pull Request. Here are some things I'd like to add:
+
+- [ ] Branching: Implement named branches for easier navigation and management.
+- [ ] Checkout: Add ability to switch between different branches or specific conversation points.
+- [ ] Rebase: Allow reorganizing and combining conversation branches.
+- [ ] Cherry-pick: Implement selecting and applying specific messages from other branches.
+- [ ] Stash: Add functionality to temporarily save and reapply uncommitted changes.
+- [ ] Tags: Allow marking significant points in the conversation history.
+- [ ] Diff: Create a tool to compare differences between branches or commits.
+- [ ] Reset: Implement the ability to move the conversation back to a previous state.
+- [ ] LLMs: Support other LLM models besides Claude
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
