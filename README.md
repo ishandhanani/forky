@@ -33,7 +33,7 @@ Forky is a command-line interface (CLI) tool that implements a git-style convers
 Run the CLI application:
 
 ```
-python -m src chat
+python -m cli.main chat
 ```
 
 Available commands:
@@ -65,6 +65,10 @@ Contributions are welcome! Please feel free to submit a Pull Request. Here are s
 - [ ] Diff: Create a tool to compare differences between branches or commits.
 - [ ] Reset: Implement the ability to move the conversation back to a previous state.
 - [ ] LLMs: Support other LLM models besides Claude
+
+## Open questions 
+
+- [ ] Should each node should be a user/assistant exchnage, not just a single message
 
 ## License
 
