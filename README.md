@@ -1,5 +1,7 @@
 # Forky: Git-style Conversation Structure for LLMs 
 
+![forky](forky.webp)
+
 Forky is a command-line interface (CLI) tool that implements a git-style conversation structure for interactions with the Claude API. It allows users to create, manage, and navigate through branching conversations, providing a unique way to explore different conversation paths with an AI assistant.
 
 ## Features
