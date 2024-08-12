@@ -16,7 +16,8 @@ def handle_chat(args):
             print("Created a new fork. You are now in the forked conversation.")
         elif user_input.lower() == '/merge':
             try:
-                tree.merge()
+                merge_prompt = input("Enter a prompt for the merge summary (optional): ").strip()
+                tree.merge(merge_prompt)
                 print("Merged the fork back into the main conversation. You are now in the main conversation.")
             except ValueError as e:
                 print(f"Error: {e}")

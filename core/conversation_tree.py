@@ -36,9 +36,9 @@ class ConversationTree:
         self.current_node.add_child(fork_node)
         self.current_node = fork_node
 
-    def merge(self) -> None:
+    def merge(self, merge_prompt: str) -> None:
         """
-        Merges the current branch back into the main conversation.
+        Merges the current branch back into the main conversation and removes the fork.
         """
         # Find the fork node
         fork_node = self.current_node
@@ -48,19 +48,25 @@ class ConversationTree:
             raise ValueError("No fork found to merge")
         
         # Summarize the forked conversation
-        summary = self._summarize_fork(fork_node)
+        if merge_prompt == "":
+            merge_prompt = "Create a 1-2 sentence summary of the following conversation so that it is easy to understand:"
+        summary = self._summarize_fork(fork_node, merge_prompt)
         
         # Move back to the main conversation
-        self.current_node = fork_node.parent
-        
+        parent_of_fork = fork_node.parent
+        self.current_node = parent_of_fork
+
         # Add the summary as a user message and an assistant response
-        merge_user_message = "Summarize our conversation in the recent fork."
-        merge_assistant_message = f"Certainly! Here's a summary of our recent conversation:\n\n{summary}"
+        merge_user_message = merge_prompt
+        merge_assistant_message = f"Here's a summary of another conversation branch: {summary}"
         
         self.add_message(merge_user_message, "user")
         self.add_message(merge_assistant_message, "assistant")
 
-    def _summarize_fork(self, fork_node: ConversationNode) -> str:
+        # Remove the fork and its entire subtree
+        parent_of_fork.remove_child(fork_node)
+
+    def _summarize_fork(self, fork_node: ConversationNode, merge_prompt: str) -> str:
         """
         Summarizes the conversation in a forked branch.
 
@@ -75,7 +81,7 @@ class ConversationTree:
             return "The forked conversation was empty."
 
         try:
-            summary = self.claude_client.summarize(messages)
+            summary = self.claude_client.summarize(messages, merge_prompt)
             print("SUMMARY: ", summary)
             return summary
         except Exception as e:
