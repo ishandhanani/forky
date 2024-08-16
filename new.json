@@ -1,0 +1,65 @@
+{
+    "content": "Root",
+    "role": "system",
+    "children": [
+        {
+            "content": "sky blue?",
+            "role": "user",
+            "children": [
+                {
+                    "content": "Yes, the sky often appears blue during the daytime. This is due to a phenomenon called Rayleigh scat",
+                    "role": "assistant",
+                    "children": [
+                        {
+                            "content": "is grass green",
+                            "role": "user",
+                            "children": [
+                                {
+                                    "content": "Yes, grass is typically green. The green color of grass comes from a pigment called chlorophyll, which is essential",
+                                    "role": "assistant",
+                                    "children": [
+                                        {
+                                            "content": "Create a 1-2 sentence summary of the following conversation so that it is easy to understand:",
+                                            "role": "user",
+                                            "children": [
+                                                {
+                                                    "content": "Here's a summary of another conversation branch: A user asked about what makes apples orange, which was corrected as apples are not typically orange. The conversation then",
+                                                    "role": "assistant",
+                                                    "children": [
+                                                        {
+                                                            "content": "Where we talking about apples, banans, or grapes?",
+                                                            "role": "user",
+                                                            "children": [
+                                                                {
+                                                                    "content": "I apologize for the confusion. We were not actually talking about apples, bananas, or grapes in this conversation",
+                                                                    "role": "assistant",
+                                                                    "children": [
+                                                                        {
+                                                                            "content": "/export new.json",
+                                                                            "role": "user",
+                                                                            "children": [
+                                                                                {
+                                                                                    "content": "I apologize, but I don't have the ability to export or save files. I'm an AI language model designed to",
+                                                                                    "role": "assistant",
+                                                                                    "children": []
+                                                                                }
+                                                                            ]
+                                                                        }
+                                                                    ]
+                                                                }
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

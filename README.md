@@ -45,6 +45,8 @@ Available commands:
 - `/status`: View the current conversation state
 - `/visualize`: See an ASCII representation of the conversation tree
 - `/history`: View the full conversation history
+- `/export`: Export conversation history to a JSON file
+- `/load`: Import conversation history from JSON file (will wipe current conversation!)
 - `quit`: Exit the application
 
 ## Project Structure

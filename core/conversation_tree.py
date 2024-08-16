@@ -201,31 +201,14 @@ class ConversationTree:
 
         return "\n".join(tree_lines(self.root))
     
-    def gen_text_tree(self) -> str:
-        """
-        Generates a text representation of the conversation tree.
 
-        Returns:
-            str: Text tree representing the conversation structure.
-        """
-        def tree_lines(node, level=0):
-            lines = []
-            lines.append(f"{'  ' * level}[{node.role}] {node.content}")
-            for child in node.children:
-                lines.extend(tree_lines(child, level + 1))
-            return lines
-
-        return "\n".join(tree_lines(self.root))
-    
-
-
-    def reset_tree(self) -> None:
-        """
-        Resets the conversation tree to its initial state.
-        """
+    # def reset_tree(self) -> None:
+    #     """
+    #     Resets the conversation tree to its initial state.
+    #     """
         
-        self.root = ConversationNode(content="Root", role="system")
-        self.current_node = self.root
+    #     self.root = ConversationNode(content="Root", role="system")
+    #     self.current_node = self.root
 
 
     def export_file(self, filename: str) -> bool:
@@ -260,8 +243,23 @@ class ConversationTree:
 
         """
 
-        self.reset_tree()
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+
+            def loadNodes(data):
+                node = ConversationNode(content=data["content"], role=data["role"])
+                node.children = [loadNodes(child) for child in data["children"]]
+                return node
+
+            self.root = loadNodes(data)
+            self.current_node = self.root
+
+            return True
+
+        except:
+            return False
 
 
 
-        return True
+

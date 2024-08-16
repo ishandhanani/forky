@@ -58,10 +58,6 @@ def visualize_tree(tree):
     print("\nConversation Tree Visualization:")
     print(ascii_tree)
 
-    text_tree = tree.gen_text_tree()
-    print("\nText-Based Conversation Tree:")
-    print(text_tree)
-
 def show_status(tree):
     print("\nCurrent conversation state:")
     messages = tree.get_flat_conversation()
