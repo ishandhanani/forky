@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
 from .conversation_node import ConversationNode
 from .api_client import ClaudeClient
+import json
 
 class ConversationTree:
     """
@@ -199,3 +200,44 @@ class ConversationTree:
             return lines
 
         return "\n".join(tree_lines(self.root))
+    
+    def gen_text_tree(self) -> str:
+        """
+        Generates a text representation of the conversation tree.
+
+        Returns:
+            str: Text tree representing the conversation structure.
+        """
+        def tree_lines(node, level=0):
+            lines = []
+            lines.append(f"{'  ' * level}[{node.role}] {node.content}")
+            for child in node.children:
+                lines.extend(tree_lines(child, level + 1))
+            return lines
+
+        return "\n".join(tree_lines(self.root))
+    
+
+
+
+
+
+    def export_file(self, filename: str) -> bool:
+        """
+        Exports the conversation tree to a JSON file
+        input argument: Name of file to save to.
+
+        """
+
+        return True
+    
+
+    def load_file(self, filename: str) -> bool:
+        """
+        Loads a conversation tree from a JSON file
+        input argument: Name of file to load from.
+
+        """
+
+
+        return True

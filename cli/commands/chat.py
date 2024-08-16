@@ -25,6 +25,21 @@ def handle_chat(args):
             visualize_tree(tree)
         elif user_input.lower() == '/history':
             show_full_history(tree)
+
+
+        elif user_input.lower() == '/export':
+            file_name = input("Enter the file name (+.JSON) to export the conversation tree to: ")
+            if tree.export_tree(file_name):
+                print(f"Exported conversation tree to '{file_name}'.")
+            else:
+                print("Failed to export conversation tree.")
+
+        elif user_input.lower() == '/import':
+            file_name = input("Current conversation and tree will be WIPED. Ensure to have a backup of current conversation. Enter the file name (+.JSON) to import the conversation tree from: ")
+            if tree.import_tree(file_name):
+                print(f"Imported conversation tree from '{file_name}'.")
+            else:
+                print("Failed to import conversation tree.")
         else:
             response = tree.chat_with_claude(user_input)
             print(f"Claude: {response}")
@@ -42,6 +57,10 @@ def visualize_tree(tree):
     ascii_tree = tree.generate_ascii_tree()
     print("\nConversation Tree Visualization:")
     print(ascii_tree)
+
+    text_tree = tree.gen_text_tree()
+    print("\nText-Based Conversation Tree:")
+    print(text_tree)
 
 def show_status(tree):
     print("\nCurrent conversation state:")
