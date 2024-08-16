@@ -219,7 +219,13 @@ class ConversationTree:
     
 
 
-
+    def reset_tree(self) -> None:
+        """
+        Resets the conversation tree to its initial state.
+        """
+        
+        self.root = ConversationNode(content="Root", role="system")
+        self.current_node = self.root
 
 
     def export_file(self, filename: str) -> bool:
@@ -229,7 +235,22 @@ class ConversationTree:
 
         """
 
-        return True
+        try:
+            # content, role, children
+            def getNodes(node):
+                return {
+                    "content": node.content,
+                    "role": node.role,
+                    "children": [getNodes(child) for child in node.children]
+                }
+
+            with open(filename, 'w') as f:
+                json.dump(getNodes(self.root), f, indent=4)
+
+            return True
+            
+        except:
+            return False
     
 
     def load_file(self, filename: str) -> bool:
@@ -238,6 +259,9 @@ class ConversationTree:
         input argument: Name of file to load from.
 
         """
+
+        self.reset_tree()
+
 
 
         return True
