@@ -7,6 +7,8 @@ def main():
 
     # Chat command
     chat_parser = subparsers.add_parser("chat", help="Start a new chat session")
+    chat_parser.add_argument("--provider", choices=["anthropic", "openai"], default="anthropic", help="LLM provider to use (default: anthropic)")
+    chat_parser.add_argument("--file", help="Path to the conversation state file (default: .forky_state.json)")
     chat_parser.set_defaults(func=chat.handle_chat)
 
     args = parser.parse_args()
