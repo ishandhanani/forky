@@ -395,35 +395,15 @@ class ConversationTree:
             
             tree.current_node = loaded_nodes.get(current_node_id, tree.root)
             
+        elif "root" in data:
+            # Legacy format detected but no longer supported
+            print("Warning: Detected legacy nested storage format. Backward compatibility has been removed.")
+            print("Please reset your conversation history or manually migrate data.")
+            # We return a fresh tree instead of crashing or trying to load
+            return cls(provider=provider)
         else:
-            # Fallback to legacy nested format
-            # NOTE: ConversationNode.from_dict expects flat data now, so we need to handle legacy recursively manually here
-            # OR we update ConversationNode.from_dict to be smart?
-            # It's cleaner to handle legacy recursion here since we are deprecating it.
-             
-            def legacy_from_dict(data):
-                # Only need enough to bootstrap
-                node = ConversationNode(
-                    content=data["content"],
-                    role=data["role"],
-                    id=data.get("id"), # Might need to generate if missing (as before)
-                    branch_name=data.get("branch_name"),
-                    timestamp=datetime.fromisoformat(data["timestamp"]) if "timestamp" in data else datetime.now() # Safety
-                )
-                if not node.id: node.id = uuid.uuid4().hex[:8] 
-                
-                for child_data in data.get("children", []):
-                     child = legacy_from_dict(child_data)
-                     node.add_child(child)
-                return node
-
-            tree.root = legacy_from_dict(data["root"])
-            # Ensure root is named master
-            if not tree.root.branch_name:
-                tree.root.branch_name = "master"
-
-            # Legacy path was list of indices
-            tree.current_node = tree._navigate_path(tree.root, data["current_node_path"])
+             # Unknown format or corrupted
+            return cls(provider=provider)
             
         return tree
 
