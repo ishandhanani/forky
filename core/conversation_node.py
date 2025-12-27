@@ -14,7 +14,6 @@ class ConversationNode:
     role: str
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     branch_name: Optional[str] = None
-    branch_name: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.now)
     children: List['ConversationNode'] = field(default_factory=list)
     parent: Optional['ConversationNode'] = None
