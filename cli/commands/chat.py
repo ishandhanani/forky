@@ -32,16 +32,31 @@ def handle_chat(args):
                 except ValueError as e:
                     print(f"Error: {e}")
             elif user_input.lower().startswith('/checkout'):
-                parts = user_input.split(maxsplit=1)
-                if len(parts) > 1:
-                    identifier = parts[1]
+                args_str = user_input[9:].strip()
+                if not args_str:
+                    print("Usage: /checkout [branch_name_or_node_id] [-b new_branch_name]")
+                else:
+                    new_branch_name = None
+                    identifier = args_str
+                    
+                    # Check for -b flag for forking
+                    if " -b " in args_str:
+                        parts = args_str.split(" -b ", 1)
+                        identifier = parts[0].strip()
+                        new_branch_name = parts[1].strip()
+                    
                     if tree.checkout(identifier):
                         print(f"Checked out to '{identifier}'.")
+                        if new_branch_name:
+                            try:
+                                tree.fork(new_branch_name)
+                                print(f"Created and switched to new branch '{new_branch_name}'.")
+                            except ValueError as e:
+                                print(f"Error creating branch: {e}")
+                        
                         tree.save_to_file(state_file)
                     else:
                         print(f"Could not find branch or node with identifier '{identifier}'.")
-                else:
-                    print("Usage: /checkout [branch_name_or_node_id]")
             elif user_input.lower() == '/merge':
                 try:
                     merge_prompt = input("Enter a prompt for the merge summary (optional): ").strip()
