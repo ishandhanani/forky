@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List, Dict, Optional
 import anthropic
 from anthropic import Anthropic
@@ -66,6 +67,7 @@ class APIClient:
         system_message = {"role": "system", "content": "You are a helpful assistant."}
         
         messages = [system_message] + conversation_history + [{"role": "user", "content": message}]
+        print("DEBUG: Sending messages to OpenAI:", json.dumps(messages, indent=2))
         
         try:
             response = self.client.chat.completions.create(

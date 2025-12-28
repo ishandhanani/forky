@@ -1,0 +1,280 @@
+.container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: transparent;
+  /* Background handled by body */
+  backdrop-filter: blur(10px);
+  /* Subtle overall blur */
+}
+
+
+/* --- Nav Sidebar --- */
+.nav-sidebar {
+  flex: 0 0 250px;
+  background-color: #0f172a;
+  /* Darker than panel */
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  z-index: 30;
+  /* Higher than tree sidebar */
+}
+
+.nav-sidebar h2 {
+  padding: 20px 24px;
+  font-size: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-main);
+  margin: 0;
+}
+
+.nav-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  list-style: none;
+  margin: 0;
+}
+
+.nav-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+}
+
+.nav-item.active {
+  background: var(--primary);
+  color: white;
+}
+
+.nav-actions {
+  padding: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.nav-actions button {
+  width: 100%;
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  /* Width handled by inline style */
+  flex-shrink: 0;
+  background-color: var(--bg-panel);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: width 0.1s ease-out;
+  /* Smooth resizing */
+  z-index: 20;
+  backdrop-filter: blur(20px);
+  overflow: hidden;
+  /* Prevent tree from spilling out */
+}
+
+.resizer {
+  width: 5px;
+  cursor: col-resize;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  background: transparent;
+  transition: background 0.2s;
+}
+
+.resizer:hover,
+.resizer:active {
+  background: var(--primary);
+  opacity: 0.5;
+}
+
+.sidebar h2 {
+  padding: 20px 24px;
+  font-size: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+  /* Ensure header doesn't shrink */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  /* Explicit height for react-d3-tree */
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  position: relative;
+  /* Context for SVG */
+}
+
+/* --- Checkout Panel --- */
+.checkout-panel {
+  padding: 20px;
+  background: rgba(30, 41, 59, 0.9);
+  border-top: 1px solid var(--border-color);
+  backdrop-filter: blur(10px);
+}
+
+.checkout-panel h3 {
+  font-size: 1rem;
+  margin-bottom: 12px;
+  color: var(--primary);
+}
+
+.checkout-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.checkout-panel input {
+  flex: 1;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: white;
+  outline: none;
+}
+
+.checkout-panel input:focus {
+  border-color: var(--primary);
+}
+
+/* --- Main Content --- */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: transparent;
+}
+
+.main h2 {
+  padding: 20px 24px;
+  font-size: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+  /* Header bar */
+}
+
+/* --- Chat History --- */
+.history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-behavior: smooth;
+}
+
+.message {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  max-width: 80%;
+  line-height: 1.6;
+  font-size: 0.95rem;
+  animation: fadeIn 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.message.user {
+  align-self: flex-end;
+  background-color: var(--bg-message-user);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message.system {
+  align-self: flex-start;
+  background-color: var(--bg-message-system);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-bottom-left-radius: 4px;
+}
+
+/* --- Input Area --- */
+.input-area {
+  padding: 24px;
+  background: linear-gradient(to top, rgba(15, 17, 21, 1) 20%, rgba(15, 17, 21, 0));
+  display: flex;
+  gap: 12px;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: white;
+  font-size: 1rem;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.input-area input:focus {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-color);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.input-area button {
+  padding: 0 24px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+/* --- Animations --- */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

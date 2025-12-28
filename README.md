@@ -32,13 +32,31 @@ Forky is a command-line interface (CLI) tool that implements a git-style convers
 
 ## Usage
 
+### CLI
 Run the CLI application:
-
 ```
 python -m cli.main chat
 ```
 
-Available commands:
+### Web Interface (Beta)
+You can also run the web interface for a richer visualization:
+
+1. **Start the Backend Server**:
+   ```bash
+   export PYTHONPATH=$PYTHONPATH:. 
+   python3 server/app.py
+   ```
+   The server runs on `http://localhost:8000`.
+
+2. **Start the Frontend**:
+   ```bash
+   cd web
+   npm install  # First time only
+   npm run dev
+   ```
+   The web app runs on `http://localhost:5173`.
+
+### Commands
 - Type your message to chat with Claude
 - `/fork`: Create a new branch in the conversation
 - `/merge`: Merge the current branch back into the main conversation
