@@ -41,6 +41,8 @@ python -m cli.main chat
 ### Web Interface (Beta)
 You can also run the web interface for a richer visualization:
 
+![frontend](frontend_example.png)
+
 1. **Start the Backend Server**:
    ```bash
    export PYTHONPATH=$PYTHONPATH:. 
