@@ -34,7 +34,7 @@ Forky is a command-line interface (CLI) tool that implements a git-style convers
 
 ### CLI
 Run the CLI application:
-```
+```bash
 python -m cli.main chat
 ```
 

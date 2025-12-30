@@ -5,7 +5,11 @@ from typing import List, Optional, Dict
 import os
 from core.conversation_tree import ConversationTree
 
-app = FastAPI()
+app = FastAPI(
+    title="Forky API",
+    description="API for the Forky conversation management tool.",
+    version="0.1.0"
+)
 
 # Enable CORS
 app.add_middleware(
@@ -25,9 +29,16 @@ PROVIDER = "openai"
 current_file_id = None
 
 def get_file_path(file_id):
+    """Returns the full file path for a given conversation ID."""
     return os.path.join(DATA_DIR, f"{file_id}.json")
 
 def load_tree(file_id=None):
+    """
+    Loads a conversation tree from disk.
+    
+    If file_id is provided, loads that specific conversation.
+    Otherwise, loads the currently active conversation or the most recently modified one.
+    """
     global current_file_id
     target_id = file_id or current_file_id
     
@@ -46,34 +57,41 @@ def load_tree(file_id=None):
     return ConversationTree.load_from_file(path, provider=PROVIDER)
 
 def save_tree(tree):
+    """Saves the given conversation tree to the file corresponding to the current global file ID."""
     path = get_file_path(current_file_id)
     tree.save_to_file(path)
 
 # Data models
 class MessageRequest(BaseModel):
+    """Request model for sending a message to the chat."""
     message: str
     conversation_id: str
 
 class CheckoutRequest(BaseModel):
+    """Request model for checking out a specific node or branch."""
     identifier: str
     conversation_id: str
     branch_name: Optional[str] = None
 
 class ForkRequest(BaseModel):
+    """Request model for creating a new fork."""
     branch_name: Optional[str] = None
     conversation_id: str
 
 class MergeRequest(BaseModel):
+    """Request model for merging the current branch."""
     merge_prompt: Optional[str] = ""
     conversation_id: str
 
 class CreateConversationRequest(BaseModel):
+    """Request model for creating a new conversation."""
     name: Optional[str] = None
 
 # Endpoints
 
 @app.get("/conversations")
 def list_conversations():
+    """Lists all available conversations, sorted by last update time."""
     conversations = []
     if not os.path.exists(DATA_DIR):
         return {"conversations": []}
@@ -101,6 +119,7 @@ def list_conversations():
 
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest):
+    """Creates a new empty conversation with an optional name."""
     global current_file_id
     import uuid
     file_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
@@ -120,6 +139,7 @@ def create_conversation(request: CreateConversationRequest):
 
 @app.post("/conversations/{file_id}/load")
 def load_conversation(file_id: str):
+    """Sets the active conversation to the specified ID."""
     global current_file_id
     path = get_file_path(file_id)
     if not os.path.exists(path):
@@ -130,6 +150,7 @@ def load_conversation(file_id: str):
 
 @app.delete("/conversations/{file_id}")
 def delete_conversation(file_id: str):
+    """Deletes a conversation by its ID."""
     global current_file_id
     path = get_file_path(file_id)
     if os.path.exists(path):
@@ -141,6 +162,11 @@ def delete_conversation(file_id: str):
 
 @app.get("/tree")
 def get_tree(conversation_id: Optional[str] = None):
+    """
+    Returns the full tree structure of the conversation.
+    
+    Includes all nodes, edges, and the current active node.
+    """
     # If explicit ID provided, use it. Otherwise fall back to global state (backward compat/default)
     target_id = conversation_id or current_file_id
     tree = load_tree(target_id)
@@ -163,6 +189,7 @@ def get_tree(conversation_id: Optional[str] = None):
 
 @app.get("/history")
 def get_history(conversation_id: Optional[str] = None):
+    """Returns the linear conversation history from the root to the current node."""
     target_id = conversation_id or current_file_id
     tree = load_tree(target_id)
     history = tree.get_flat_conversation()
@@ -170,6 +197,11 @@ def get_history(conversation_id: Optional[str] = None):
 
 @app.post("/chat")
 def chat(request: MessageRequest):
+    """
+    Sends a message to the LLM and gets a response.
+    
+    Updates the conversation tree with the new user message and assistant response.
+    """
     tree = load_tree(request.conversation_id)
     try:
         response = tree.chat(request.message)
@@ -185,6 +217,7 @@ def chat(request: MessageRequest):
 
 @app.post("/checkout")
 def checkout(request: CheckoutRequest):
+    """Checks out to a valid node ID or branch name."""
     tree = load_tree(request.conversation_id)
     success = tree.checkout(request.identifier)
     if not success:
@@ -205,6 +238,7 @@ def checkout(request: CheckoutRequest):
 
 @app.post("/fork")
 def fork(request: ForkRequest):
+    """Creates a new branch from the current node."""
     tree = load_tree(request.conversation_id)
     try:
         branch_name = tree.fork(request.branch_name)
@@ -216,6 +250,11 @@ def fork(request: ForkRequest):
 
 @app.post("/merge")
 def merge(request: MergeRequest):
+    """
+    Merges the current branch into its parent.
+    
+    Optionally accepts a custom merge prompt to guide the summarization.
+    """
     tree = load_tree(request.conversation_id)
     try:
         tree.merge(request.merge_prompt or "")
