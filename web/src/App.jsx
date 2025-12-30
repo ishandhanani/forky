@@ -3,6 +3,8 @@ import Tree from 'react-d3-tree'
 import axios from 'axios'
 import './App.css'
 import CustomNode from './CustomNode'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const API_URL = 'http://localhost:8000'
 
@@ -333,7 +335,13 @@ function App() {
               const content = msg.replace(/^(User:|System:|Assistant:|user:|system:|assistant:)\s*/, "")
               return (
                 <div key={i} className={`message ${isUser ? 'user' : 'system'}`}>
-                  {content}
+                  {isUser ? (
+                    content
+                  ) : (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {content}
+                    </ReactMarkdown>
+                  )}
                 </div>
               )
             })
