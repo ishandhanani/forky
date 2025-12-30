@@ -67,6 +67,8 @@ class MessageRequest(BaseModel):
     """Request model for sending a message to the chat."""
     message: str
     conversation_id: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 class CheckoutRequest(BaseModel):
     """Request model for checking out a specific node or branch."""
@@ -207,7 +209,7 @@ def chat(request: MessageRequest):
     
     async def generate():
         try:
-            for chunk in tree.chat_stream(request.message):
+            for chunk in tree.chat_stream(request.message, provider=request.provider, model=request.model):
                 yield chunk
             
             # Save after completion

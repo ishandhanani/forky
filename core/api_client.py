@@ -8,23 +8,37 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 class APIClient:
-    def __init__(self, provider: str = "anthropic"):
+    def __init__(self, provider: str = "anthropic", model: Optional[str] = None):
         load_dotenv()
-        self.provider = provider
         
+        # If model is provided, try to infer provider or respect explicit provider
+        if model:
+            self.model = model
+            if "gpt" in model.lower():
+                self.provider = "openai"
+            elif "claude" in model.lower():
+                self.provider = "anthropic"
+            else:
+                self.provider = provider
+        else:
+            self.provider = provider
+            # Set default models
+            if self.provider == "anthropic":
+                self.model = "claude-3-5-sonnet-20240620"
+            elif self.provider == "openai":
+                self.model = "gpt-4o"
+
         if self.provider == "anthropic":
             api_key = os.getenv("ANTHROPIC_API_KEY")
             if not api_key:
                 raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
             self.client = Anthropic(api_key=api_key)
-            self.model = "claude-3-5-sonnet-20240620"
             
         elif self.provider == "openai":
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
                 raise ValueError("OPENAI_API_KEY not found in environment variables")
             self.client = OpenAI(api_key=api_key)
-            self.model = "gpt-4o"
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 

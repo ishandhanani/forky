@@ -15,6 +15,7 @@ function App() {
   const [history, setHistory] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('claude-4.5-sonnet')
   const [sidebarWidth, setSidebarWidth] = useState(450)
   const [isResizing, setIsResizing] = useState(false)
   const historyEndRef = useRef(null)
@@ -223,7 +224,8 @@ function App() {
         },
         body: JSON.stringify({
           message: input,
-          conversation_id: currentConversationId
+          conversation_id: currentConversationId,
+          model: selectedModel
         })
       })
 
@@ -353,6 +355,19 @@ function App() {
           <div ref={historyEndRef} />
         </div>
         <form onSubmit={sendMessage} className="input-area">
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            disabled={loading || !currentConversationId}
+            style={{ marginRight: '10px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+          >
+            <option value="claude-4.5-sonnet">Claude Sonnet 4.5</option>
+            <option value="claude-4.5-haiku">Claude Haiku 4.5</option>
+            <option value="claude-4.5-opus">Claude Opus 4.5</option>
+            <option value="gpt-5.2-2025-12-11">gpt-5.2-2025-12-11</option>
+            <option value="gpt-5-mini-2025-08-07">gpt-5-mini-2025-08-07</option>
+            <option value="gpt-5-nano-2025-08-07">gpt-5-nano-2025-08-07</option>
+          </select>
           <input
             type="text"
             value={input}

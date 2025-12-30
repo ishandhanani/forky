@@ -136,27 +136,35 @@ class ConversationTree:
             current = child
         return messages
 
-    def chat(self, message: str) -> str:
+    def chat(self, message: str, provider: Optional[str] = None, model: Optional[str] = None) -> str:
         """
         Sends a message to the LLM and gets a response, using the full conversation history.
 
         Args:
             message (str): The message to send.
+            provider (str, optional): The provider to use (openai or anthropic).
+            model (str, optional): The specific model to use.
 
         Returns:
             str: LLM response.
         """
+        if (model and model != self.api_client.model) or (provider and provider != self.api_client.provider):
+            self.api_client = APIClient(provider=provider or self.api_client.provider, model=model)
+            
         conversation_history = self.get_conversation_history()
         self.add_message(message, "user")
         response = self.api_client.get_response(message, conversation_history)
         self.add_message(response, "assistant")
         return response
 
-    def chat_stream(self, message: str):
+    def chat_stream(self, message: str, provider: Optional[str] = None, model: Optional[str] = None):
         """
         Sends a message to the LLM and yields the response as chunks.
         Updates the tree in real-time.
         """
+        if (model and model != self.api_client.model) or (provider and provider != self.api_client.provider):
+            self.api_client = APIClient(provider=provider or self.api_client.provider, model=model)
+
         conversation_history = self.get_conversation_history()
         self.add_message(message, "user")
         
