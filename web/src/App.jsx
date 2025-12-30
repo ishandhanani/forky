@@ -205,8 +205,8 @@ function App() {
     e.preventDefault()
     if (!input.trim()) return
 
-    const userMsg = `User: ${input}`
-    const assistantMsgPrefix = `Assistant: `
+    const userMsg = `user: ${input}`
+    const assistantMsgPrefix = `assistant: `
 
     // Optimistic update
     setHistory(prev => [...prev, userMsg, assistantMsgPrefix])
@@ -329,8 +329,8 @@ function App() {
         <div className="history">
           {history.length > 0 ? (
             history.map((msg, i) => {
-              const isUser = msg.startsWith("User:")
-              const content = msg.replace(/^(User:|System:|Assistant:)\s*/, "")
+              const isUser = msg.startsWith("User:") || msg.startsWith("user:")
+              const content = msg.replace(/^(User:|System:|Assistant:|user:|system:|assistant:)\s*/, "")
               return (
                 <div key={i} className={`message ${isUser ? 'user' : 'system'}`}>
                   {content}
