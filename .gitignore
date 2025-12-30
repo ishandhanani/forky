@@ -1,3 +1,4 @@
+.DS_Store
 .env
 
 __pycache__/
@@ -5,3 +6,5 @@ __pycache__/
 apidocs.txt
 
 venv/
+
+.forky_conversations

@@ -278,3 +278,9 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Custom Tree Styling */
+.rd3t-link {
+  stroke: white !important;
+  stroke-width: 1px !important;
+}
