@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Body
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
@@ -203,17 +204,22 @@ def chat(request: MessageRequest):
     Updates the conversation tree with the new user message and assistant response.
     """
     tree = load_tree(request.conversation_id)
-    try:
-        response = tree.chat(request.message)
-        save_tree(tree) # Note: save_tree relies on global current_file_id which might be wrong!
-        # Fix save_tree to take path or ID too?
-        # Let's fix save_tree uses.
-        path = get_file_path(request.conversation_id)
-        tree.save_to_file(path)
-        
-        return {"response": response}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    
+    async def generate():
+        try:
+            for chunk in tree.chat_stream(request.message):
+                yield chunk
+            
+            # Save after completion
+            path = get_file_path(request.conversation_id)
+            tree.save_to_file(path)
+        except Exception as e:
+            # In a stream, we can't easily raise HTTP exception once started, 
+            # but we can log or yield an error message if caught early.
+            print(f"Streaming error: {e}")
+            yield f"[Error: {str(e)}]"
+
+    return StreamingResponse(generate(), media_type="text/plain")
 
 @app.post("/checkout")
 def checkout(request: CheckoutRequest):

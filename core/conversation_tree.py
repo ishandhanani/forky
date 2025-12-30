@@ -152,6 +152,24 @@ class ConversationTree:
         self.add_message(response, "assistant")
         return response
 
+    def chat_stream(self, message: str):
+        """
+        Sends a message to the LLM and yields the response as chunks.
+        Updates the tree in real-time.
+        """
+        conversation_history = self.get_conversation_history()
+        self.add_message(message, "user")
+        
+        # Create a new empty assistant node
+        assistant_node = ConversationNode(content="", role="assistant")
+        self.current_node.add_child(assistant_node)
+        self.current_node = assistant_node
+
+        # Stream response
+        for chunk in self.api_client.get_response_stream(message, conversation_history):
+            assistant_node.content += chunk
+            yield chunk
+
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """
         Retrieves the conversation history for the current branch, excluding system messages.

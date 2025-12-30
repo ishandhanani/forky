@@ -205,15 +205,51 @@ function App() {
     e.preventDefault()
     if (!input.trim()) return
 
+    const userMsg = `User: ${input}`
+    const assistantMsgPrefix = `Assistant: `
+
+    // Optimistic update
+    setHistory(prev => [...prev, userMsg, assistantMsgPrefix])
+    setInput('')
     setLoading(true)
+
     try {
-      await axios.post(`${API_URL}/chat`, {
-        message: input,
-        conversation_id: currentConversationId
+      const response = await fetch(`${API_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: input,
+          conversation_id: currentConversationId
+        })
       })
-      setInput('')
+
+      if (!response.body) return
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let assistantResponse = ""
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        assistantResponse += chunk
+
+        // Update the last message in history with the accumulated response
+        setHistory(prev => {
+          const newHistory = [...prev]
+          newHistory[newHistory.length - 1] = assistantMsgPrefix + assistantResponse
+          return newHistory
+        })
+      }
+
+      // Cleanup / Finalize
       refresh()
     } catch (err) {
+      console.error(err)
       alert('Error sending message')
     } finally {
       setLoading(false)
