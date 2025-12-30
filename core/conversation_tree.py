@@ -39,7 +39,7 @@ class ConversationTree:
         self.current_node.add_child(new_node)
         self.current_node = new_node
 
-    def fork(self, branch_name: Optional[str] = None) -> None:
+    def fork(self, branch_name: Optional[str] = None) -> str:
         """
         Creates a new branch in the conversation.
 
@@ -62,60 +62,41 @@ class ConversationTree:
                 
         fork_node = ConversationNode(content="<FORK>", role="system", branch_name=branch_name)
         self.current_node.add_child(fork_node)
-        self.current_node = fork_node
         return branch_name
 
-    def merge(self, merge_prompt: str) -> None:
+    def merge_branches(self, target_node_id: str, merge_prompt: str) -> None:
         """
-        Merges the current branch back into the main conversation and removes the fork.
-        """
-        # Find the fork node
-        fork_node = self.current_node
-        while fork_node.content != "<FORK>" and fork_node.parent:
-            fork_node = fork_node.parent
-        if fork_node.content != "<FORK>":
-            raise ValueError("No fork found to merge")
+        Merges the target node's branch into the current branch using a DAG strategy.
         
-        # Summarize the forked conversation
-        if merge_prompt == "":
-            merge_prompt = "Create a 1-2 sentence summary of the following conversation so that it is easy to understand:"
-        summary = self._summarize_fork(fork_node, merge_prompt)
-        
-        # Move back to the main conversation
-        parent_of_fork = fork_node.parent
-        self.current_node = parent_of_fork
-
-        # Add the summary as a user message and an assistant response
-        merge_user_message = merge_prompt
-        merge_assistant_message = f"Here's a summary of another conversation branch ({fork_node.branch_name or 'unnamed'}): {summary}"
-        
-        self.add_message(merge_user_message, "user")
-        self.add_message(merge_assistant_message, "assistant")
-
-        # Remove the fork and its entire subtree
-        parent_of_fork.remove_child(fork_node)
-
-    def _summarize_fork(self, fork_node: ConversationNode, merge_prompt: str) -> str:
-        """
-        Summarizes the conversation in a forked branch.
-
         Args:
-            fork_node (ConversationNode): The node representing the fork.
-
-        Returns:
-            str: A summary of the forked conversation.
+            target_node_id (str): The ID of the leaf node from the other branch to merge in.
+            merge_prompt (str): The user's question or prompt that synthesizes the two branches.
         """
-        messages = self._collect_messages(fork_node)
-        if not messages:
-            return "The forked conversation was empty."
+        target_node = self.find_node_by_id(target_node_id)
+        if not target_node:
+            raise ValueError(f"Target node {target_node_id} not found")
+            
+        if target_node == self.current_node:
+             raise ValueError("Cannot merge a node into itself")
 
-        try:
-            summary = self.api_client.summarize(messages, merge_prompt)
-            print("SUMMARY: ", summary)
-            return summary
-        except Exception as e:
-            print(f"Error while summarizing fork: {e}")
-            return "Unable to summarize the forked conversation due to an error."
+        # Create the Merge Node
+        # It's a User message containing the merge prompt.
+        merge_node = ConversationNode(content=merge_prompt, role="user")
+        
+        # Parent 1: Current Node (Mainline)
+        self.current_node.add_child(merge_node)
+        
+        # Parent 2: Target Node (Incoming)
+        target_node.add_child(merge_node)
+        
+        # Move current pointer
+        self.current_node = merge_node
+        
+        # Get response handles the context construction
+        response = self.api_client.get_response(merge_prompt, self.get_conversation_history())
+        self.add_message(response, "assistant")
+
+
 
     def _collect_messages(self, node: ConversationNode) -> List[str]:
         """
@@ -180,23 +161,75 @@ class ConversationTree:
 
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """
-        Retrieves the conversation history for the current branch, excluding system messages.
-
-        Returns:
-            List[Dict[str, str]]: A list of dictionaries representing the conversation history.
+        Retrieves the conversation history. Handles DAGs by linearizing secondary parent histories.
         """
         history = []
         current = self.current_node
         
         while current:
+            # Add current message
             if current.role in ["user", "assistant"]:
                 history.append({"role": current.role, "content": current.content})
             elif current.role == "system" and current.content.startswith("MERGE SUMMARY:"):
-                # Include merge summaries as user messages
-                history.append({"role": "user", "content": current.content})
-            current = current.parent
+                 history.append({"role": "user", "content": current.content})
+
+            # Move to parent
+            if len(current.parents) > 1:
+                # Merge Node Logic
+                main_parent = current.parents[0]
+                secondary_parent = current.parents[1]
+                
+                # Identify common ancestors to avoid duplication
+                main_ancestors = self._get_ancestors(main_parent)
+                
+                # Get unique history from secondary branch
+                secondary_history_nodes = self._get_history_nodes_until(secondary_parent, stop_nodes=main_ancestors)
+                
+                # Format secondary history
+                context_text = "Context from merged branch:\n"
+                for node in secondary_history_nodes:
+                    if node.role in ["user", "assistant"]:
+                         context_text += f"{node.role}: {node.content}\n"
+                
+                # Insert this context as a system message (or user note) effectively *before* the merge node
+                # Since 'history' is currently [MergeNode, ...], we append to it (which is 'before' in time)
+                history.append({"role": "system", "content": context_text})
+                
+                current = main_parent
+            elif current.parents:
+                current = current.parents[0]
+            else:
+                current = None
             
         return list(reversed(history))
+
+    def _get_ancestors(self, node: ConversationNode) -> set:
+        """Returns a set of all ancestor IDs for a given node."""
+        ancestors = set()
+        queue = [node]
+        while queue:
+            curr = queue.pop(0)
+            ancestors.add(curr.id)
+            queue.extend(curr.parents)
+        return ancestors
+
+    def _get_history_nodes_until(self, start_node: ConversationNode, stop_nodes: set) -> List[ConversationNode]:
+        """
+        Traverses backwards from start_node until hitting a node in stop_nodes (or root).
+        Returns a list of nodes (chronological/reversed order? -> We want chronological for display, 
+        but we traverse backwards. This returns list in Reverse Chronological order (Leaf -> Root)).
+        """
+        nodes = []
+        current = start_node
+        while current:
+            if current.id in stop_nodes:
+                break
+            nodes.append(current)
+            if current.parents:
+                current = current.parents[0]
+            else:
+                break
+        return list(reversed(nodes)) # Return chronological: Root-ish -> Leaf
 
     def print_tree(self, node: Optional[ConversationNode] = None, level: int = 0) -> None:
         """

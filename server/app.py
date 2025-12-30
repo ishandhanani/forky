@@ -86,6 +86,12 @@ class MergeRequest(BaseModel):
     merge_prompt: Optional[str] = ""
     conversation_id: str
 
+class MergeBranchesRequest(BaseModel):
+    """Request model for DAG merge of two branches."""
+    target_node_id: str
+    merge_prompt: str
+    conversation_id: str
+
 class CreateConversationRequest(BaseModel):
     """Request model for creating a new conversation."""
     name: Optional[str] = None
@@ -256,19 +262,19 @@ def fork(request: ForkRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/merge")
-def merge(request: MergeRequest):
+
+
+@app.post("/merge_branches")
+def merge_branches(request: MergeBranchesRequest):
     """
-    Merges the current branch into its parent.
-    
-    Optionally accepts a custom merge prompt to guide the summarization.
+    Merges a target branch into the current branch (DAG merge).
     """
     tree = load_tree(request.conversation_id)
     try:
-        tree.merge(request.merge_prompt or "")
+        tree.merge_branches(request.target_node_id, request.merge_prompt)
         path = get_file_path(request.conversation_id)
         tree.save_to_file(path)
-        return {"message": "Merged successfully"}
+        return {"message": "Branches merged successfully", "new_node_id": tree.current_node.id}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

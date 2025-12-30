@@ -57,14 +57,26 @@ def handle_chat(args):
                         tree.save_to_file(state_file)
                     else:
                         print(f"Could not find branch or node with identifier '{identifier}'.")
-            elif user_input.lower() == '/merge':
-                try:
-                    merge_prompt = input("Enter a prompt for the merge summary (optional): ").strip()
-                    tree.merge(merge_prompt)
-                    print("Merged the fork back into the main conversation. You are now in the main conversation.")
-                    tree.save_to_file(state_file)
-                except ValueError as e:
-                    print(f"Error: {e}")
+            elif user_input.lower().startswith('/merge'):
+                # Usage: /merge <branch_name> [prompt]
+                parts = user_input.split(maxsplit=2)
+                if len(parts) < 2:
+                    print("Usage: /merge <branch_name> [optional_prompt]")
+                else:
+                    target_branch = parts[1]
+                    merge_prompt = parts[2] if len(parts) > 2 else "Merge branch context"
+                    
+                    try:
+                        # We need to find the node ID for the tip of the target branch
+                        target_node = tree.find_branch_head(target_branch)
+                        if target_node:
+                             tree.merge_branches(target_node.id, merge_prompt)
+                             print(f"Merged branch '{target_branch}' into current conversation.")
+                             tree.save_to_file(state_file)
+                        else:
+                            print(f"Branch '{target_branch}' not found.")
+                    except ValueError as e:
+                        print(f"Error: {e}")
             elif user_input.lower() == '/visualize':
                 visualize_tree(tree)
             elif user_input.lower() == '/history':
