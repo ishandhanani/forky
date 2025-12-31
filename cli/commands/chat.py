@@ -4,6 +4,13 @@ import os
 DEFAULT_STATE_FILE = ".forky_state.json"
 
 def handle_chat(args):
+    """
+    Main entry point for the chat command.
+    Handles the interactive chat loop, command processing, and conversation management.
+
+    Args:
+        args: Command line arguments containing provider, file, etc.
+    """
     state_file = args.file if hasattr(args, 'file') and args.file else DEFAULT_STATE_FILE
     
     if os.path.exists(state_file):
@@ -95,6 +102,9 @@ def handle_chat(args):
             tree.save_to_file(state_file)
 
 def show_full_history(tree):
+    """
+    Displays the full linear history of the current branch in the conversation.
+    """
     history = tree.get_conversation_history()
     print("\nFull Conversation History:")
     for message in history:
@@ -104,11 +114,17 @@ def show_full_history(tree):
         print(f"{message['role'].capitalize()}: {content}")
 
 def visualize_tree(tree):
+    """
+    Prints an ASCII representation of the conversation tree structure.
+    """
     ascii_tree = tree.generate_ascii_tree()
     print("\nConversation Tree Visualization:")
     print(ascii_tree)
 
 def show_status(tree):
+    """
+    Displays the current state (current branch context and fork status).
+    """
     print("\nCurrent conversation state:")
     messages = tree.get_flat_conversation()
     for message in messages:

@@ -26,8 +26,7 @@ DATA_DIR = ".forky_conversations"
 os.makedirs(DATA_DIR, exist_ok=True)
 PROVIDER = "openai" 
 
-# Global state to track current active file
-current_file_id = None
+# Stateless approach: file ID is passed in requests
 
 def get_file_path(file_id):
     """Returns the full file path for a given conversation ID."""
@@ -38,13 +37,13 @@ def load_tree(file_id=None):
     Loads a conversation tree from disk.
     
     If file_id is provided, loads that specific conversation.
-    Otherwise, loads the currently active conversation or the most recently modified one.
+    Otherwise, defaults to the most recently modified conversation.
+    Does NOT maintain global state.
     """
-    global current_file_id
-    target_id = file_id or current_file_id
+    target_id = file_id
     
     if not target_id:
-        # If no active file, try to find the most recent one or create default
+        # If no explicit file_id, try to find the most recent one or create default
         files = [f for f in os.listdir(DATA_DIR) if f.endswith(".json")]
         if files:
             # Sort by mtime descending
@@ -53,13 +52,18 @@ def load_tree(file_id=None):
         else:
             target_id = "default"
     
-    current_file_id = target_id
     path = get_file_path(target_id)
+    # If path doesn't exist and it's 'default', load_from_file handles it by returning new tree
+    # If path doesn't exist and it's specific ID, load_from_file also handles it (returns empty tree currently)
+    # But ideally we might want to 404 if specific ID missing? 
+    # Current behavior of load_from_file: "if not os.path.exists... return cls(provider)". 
+    # This might hide 404s. But for now, we invoke it.
+    
     return ConversationTree.load_from_file(path, provider=PROVIDER)
 
-def save_tree(tree):
-    """Saves the given conversation tree to the file corresponding to the current global file ID."""
-    path = get_file_path(current_file_id)
+def save_tree(tree, file_id):
+    """Saves the given conversation tree to the specified file ID."""
+    path = get_file_path(file_id)
     tree.save_to_file(path)
 
 # Data models
@@ -117,7 +121,10 @@ def list_conversations():
                     "id": file_id,
                     "name": file_id, # Could improve naming later
                     "updated_at": mtime,
-                    "is_active": file_id == current_file_id
+                    "id": file_id,
+                    "name": file_id, # Could improve naming later
+                    "updated_at": mtime,
+                    # "is_active": False # Concept of active is client-side now
                 })
             except Exception:
                 continue
@@ -129,7 +136,6 @@ def list_conversations():
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest):
     """Creates a new empty conversation with an optional name."""
-    global current_file_id
     import uuid
     file_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
     # sanitize filename
@@ -143,29 +149,27 @@ def create_conversation(request: CreateConversationRequest):
     tree = ConversationTree(provider=PROVIDER)
     tree.save_to_file(path)
     
-    current_file_id = file_id
+    tree.save_to_file(path)
+    
     return {"id": file_id, "message": "Conversation created"}
 
-@app.post("/conversations/{file_id}/load")
+@app.post("/conversations/{file_id}/load") # Kept for compat, but essentially a verify endpoint
 def load_conversation(file_id: str):
-    """Sets the active conversation to the specified ID."""
-    global current_file_id
+    """Verifies that the conversation exists."""
     path = get_file_path(file_id)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Conversation not found")
     
-    current_file_id = file_id
     return {"id": file_id, "message": "Conversation loaded"}
 
 @app.delete("/conversations/{file_id}")
 def delete_conversation(file_id: str):
     """Deletes a conversation by its ID."""
-    global current_file_id
     path = get_file_path(file_id)
     if os.path.exists(path):
         os.remove(path)
-        if current_file_id == file_id:
-            current_file_id = None
         return {"message": "Conversation deleted"}
     raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -176,9 +180,7 @@ def get_tree(conversation_id: Optional[str] = None):
     
     Includes all nodes, edges, and the current active node.
     """
-    # If explicit ID provided, use it. Otherwise fall back to global state (backward compat/default)
-    target_id = conversation_id or current_file_id
-    tree = load_tree(target_id)
+    tree = load_tree(conversation_id)
     # Helper to serialize recursively
     def serialize_node(node):
         return {
@@ -201,8 +203,7 @@ def get_graph(conversation_id: Optional[str] = None):
     """
     Returns a flat list of all nodes for graph visualization.
     """
-    target_id = conversation_id or current_file_id
-    tree = load_tree(target_id)
+    tree = load_tree(conversation_id)
     nodes = tree.get_all_nodes()
     return {
         "nodes": nodes,
@@ -213,8 +214,7 @@ def get_graph(conversation_id: Optional[str] = None):
 @app.get("/history")
 def get_history(conversation_id: Optional[str] = None):
     """Returns the linear conversation history from the root to the current node."""
-    target_id = conversation_id or current_file_id
-    tree = load_tree(target_id)
+    tree = load_tree(conversation_id)
     history = tree.get_flat_conversation()
     return {"history": history}
 

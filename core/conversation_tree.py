@@ -28,7 +28,6 @@ class ConversationTree:
         while queue:
             node = queue.pop(0)
             if node.branch_name:
-                 is_current_branch = False
                  branches.append({
                      "name": node.branch_name,
                      "head_id": node.id, 
@@ -41,6 +40,9 @@ class ConversationTree:
         return branches
 
     def _get_all_branch_names(self) -> set:
+        """
+        Helper method to retrieve a set of all active branch names in the tree.
+        """
         return {b['name'] for b in self.get_branches_info()}
 
     def add_message(self, content: str, role: str) -> None:
@@ -166,8 +168,15 @@ class ConversationTree:
 
     def chat_stream(self, message: str, provider: Optional[str] = None, model: Optional[str] = None):
         """
-        Sends a message to the LLM and yields the response as chunks.
-        Updates the tree in real-time.
+        Sends a message to the LLM and yields the response as chunks, updating the tree in real-time.
+
+        Args:
+            message (str): The user message to send.
+            provider (Optional[str]): The LLM provider (e.g., "anthropic").
+            model (Optional[str]): The specific model version to use.
+        
+        Yields:
+             str: Chunks of the LLM response.
         """
         if (model and model != self.api_client.model) or (provider and provider != self.api_client.provider):
             self.api_client = APIClient(provider=provider or self.api_client.provider, model=model)
@@ -285,6 +294,12 @@ class ConversationTree:
         return list(reversed(messages))
 
     def is_in_fork(self) -> bool:
+        """
+        Checks if the current node is within a forked branch (descendant of a <FORK> node).
+
+        Returns:
+            bool: True if inside a fork, False otherwise.
+        """
         current = self.current_node
         while current.parent:
             if current.content == "<FORK>":
@@ -456,6 +471,10 @@ class ConversationTree:
     def _flatten_tree(self) -> Dict[str, dict]:
         """
         Traverses the tree and returns a dictionary of node_id -> node_dict.
+        Used for serialization.
+
+        Returns:
+            Dict[str, dict]: A map of all nodes in the tree.
         """
         nodes_map = {}
         queue = [self.root]
@@ -518,6 +537,13 @@ class ConversationTree:
     def _get_node_path(self, target_node: ConversationNode) -> List[int]:
         """
         Returns a list of indices representing the path from root to target_node.
+        Legacy helper for tree navigation.
+
+        Args:
+             target_node (ConversationNode): The destination node.
+
+        Returns:
+            List[int]: List of child indices to follow from root.
         """
         path = []
         current = target_node
@@ -530,6 +556,14 @@ class ConversationTree:
     def _navigate_path(self, root: ConversationNode, path: List[int]) -> ConversationNode:
         """
         Navigates from root using the provided path indices.
+        Legacy helper.
+
+        Args:
+            root (ConversationNode): The starting node.
+            path (List[int]): The sequence of child indices.
+
+        Returns:
+             ConversationNode: The node at the end of the path.
         """
         current = root
         for index in path:

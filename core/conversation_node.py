@@ -57,9 +57,15 @@ class ConversationNode:
                 child.parents.remove(self)
 
     def is_leaf(self) -> bool:
+        """
+        Returns True if the node has no children.
+        """
         return len(self.children) == 0
 
     def is_root(self) -> bool:
+        """
+        Returns True if the node has no parents.
+        """
         return len(self.parents) == 0
 
     def depth(self) -> int:
@@ -98,6 +104,9 @@ class ConversationNode:
         )
 
     def __str__(self) -> str:
+        """
+        Returns a string representation of the node for debugging/logging.
+        """
         content_preview = self.content[:50] + '...' if len(self.content) > 50 else self.content
         prefix = f"[{self.branch_name}] " if self.branch_name else ""
         return f"{prefix}{self.role}: {content_preview}"
