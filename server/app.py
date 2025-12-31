@@ -196,6 +196,20 @@ def get_tree(conversation_id: Optional[str] = None):
         "conversation_id": target_id
     }
 
+@app.get("/graph")
+def get_graph(conversation_id: Optional[str] = None):
+    """
+    Returns a flat list of all nodes for graph visualization.
+    """
+    target_id = conversation_id or current_file_id
+    tree = load_tree(target_id)
+    nodes = tree.get_all_nodes()
+    return {
+        "nodes": nodes,
+        "current_node_id": tree.current_node.id,
+        "root_id": tree.root.id
+    }
+
 @app.get("/history")
 def get_history(conversation_id: Optional[str] = None):
     """Returns the linear conversation history from the root to the current node."""

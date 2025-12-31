@@ -1,23 +1,30 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import Tree from 'react-d3-tree'
 import axios from 'axios'
 import './App.css'
-import CustomNode from './CustomNode'
+import FlowGraph from './components/FlowGraph'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+
 
 const API_URL = 'http://localhost:8000'
 
 function App() {
   const [conversations, setConversations] = useState([])
   const [currentConversationId, setCurrentConversationId] = useState(null)
-  const [treeData, setTreeData] = useState(null)
+  // node data for graph
+  const [graphData, setGraphData] = useState([])
+  const [currentNodeId, setCurrentNodeId] = useState(null)
+
   const [history, setHistory] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState('claude-4.5-sonnet')
   const [sidebarWidth, setSidebarWidth] = useState(450)
   const [isResizing, setIsResizing] = useState(false)
+
+  // Selection state
+  const [selectedNodeIds, setSelectedNodeIds] = useState([])
+
   const historyEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -120,7 +127,7 @@ function App() {
           const next = updatedList[0]
           await handleSelectConversation(next.id)
         } else {
-          setTreeData(null)
+          setGraphData([])
           setHistory([])
           setCurrentConversationId(null)
         }
@@ -131,54 +138,15 @@ function App() {
     }
   }
 
-  const fetchTree = useCallback(async () => {
+  const fetchGraph = useCallback(async () => {
+    if (!currentConversationId) return;
     try {
-      const url = currentConversationId ? `${API_URL}/tree?conversation_id=${currentConversationId}` : `${API_URL}/tree`
-      const res = await axios.get(url)
-
-      const transform = (node) => {
-        // Linear merge: User -> one Assistant child
-        if (node.role === 'user' && node.children && node.children.length === 1 && node.children[0].role === 'assistant') {
-          const assistantNode = node.children[0];
-          return {
-            name: 'TURN',
-            role: 'turn',
-            userContent: node.content,
-            assistantContent: assistantNode.content,
-            attributes: {
-              id: assistantNode.id,
-              isCurrent: assistantNode.is_current || node.is_current,
-              fullUserContent: node.content,
-              fullAssistantContent: assistantNode.content
-            },
-            children: assistantNode.children.map(transform)
-          }
-        }
-
-        return {
-          name: node.role === 'system' && node.content === 'Root' ? 'ROOT' :
-            node.role === 'system' && node.content === '<FORK>' ? `<FORK: ${node.branch_name}>` :
-              `${node.role}`,
-          role: node.role,
-          content: node.content,
-          attributes: {
-            id: node.id,
-            fullContent: node.content,
-            branch: node.branch_name,
-            isCurrent: node.is_current
-          },
-          children: node.children ? node.children.map(transform) : []
-        }
-      }
-
-      if (res.data.root) {
-        setTreeData([transform(res.data.root)])
-      }
-      if (res.data.conversation_id && !currentConversationId) {
-        setCurrentConversationId(res.data.conversation_id)
-      }
+      const res = await axios.get(`${API_URL}/graph?conversation_id=${currentConversationId}`)
+      // Expecting { nodes: [...], current_node_id: ... }
+      setGraphData(res.data.nodes || [])
+      setCurrentNodeId(res.data.current_node_id)
     } catch (err) {
-      console.error("Failed to fetch tree", err)
+      console.error("Failed to fetch graph", err)
     }
   }, [currentConversationId])
 
@@ -194,9 +162,9 @@ function App() {
   }, [currentConversationId])
 
   const refresh = useCallback(() => {
-    fetchTree()
+    fetchGraph()
     fetchHistory()
-  }, [fetchTree, fetchHistory])
+  }, [fetchGraph, fetchHistory])
 
   // Initial load
   useEffect(() => {
@@ -208,6 +176,60 @@ function App() {
     e.preventDefault()
     if (!input.trim()) return
 
+    // CHECK SELECTION FOR MERGE
+    if (selectedNodeIds.length === 2) {
+      // MERGE LOGIC
+      // We know we want to merge 2 nodes with this prompt.
+      // We need to determine which is 'current' and which is 'target'.
+
+      // Check if one of them is the current active node
+      const isCurrentInSelection = selectedNodeIds.includes(currentNodeId)
+
+      let targetId = null
+
+      if (isCurrentInSelection) {
+        // Target is the other one
+        targetId = selectedNodeIds.find(id => id !== currentNodeId)
+      } else {
+        // Neither is current.
+        // Heuristic: We must checkout one of them first.
+        // Let's checkout the first one in list, and merge the second.
+        const baseId = selectedNodeIds[0]
+        targetId = selectedNodeIds[1]
+
+        console.log(`Neither sel is current. Auto-checking out ${baseId} then merging ${targetId}`)
+
+        try {
+          await axios.post(`${API_URL}/checkout`, {
+            identifier: baseId,
+            conversation_id: currentConversationId
+          })
+        } catch (err) {
+          alert("Failed to auto-checkout base node for merge.")
+          return;
+        }
+      }
+
+      console.log(`Merging ${targetId} into current...`)
+      setLoading(true)
+      try {
+        await axios.post(`${API_URL}/merge_branches`, {
+          target_node_id: targetId,
+          merge_prompt: input,
+          conversation_id: currentConversationId
+        })
+        setInput('')
+        setSelectedNodeIds([]) // Clear selection
+        refresh()
+      } catch (err) {
+        alert("Merge failed: " + (err.response?.data?.detail || err.message))
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // NORMAL SEND LOGIC
     const userMsg = `user: ${input}`
     const assistantMsgPrefix = `assistant: `
 
@@ -260,19 +282,43 @@ function App() {
     }
   }
 
-  const handleNodeClick = async (nodeDatum) => {
-    const attributes = nodeDatum.attributes || (nodeDatum.data && nodeDatum.data.attributes);
-    if (attributes && attributes.id) {
-      // Auto-checkout on click
-      try {
-        await axios.post(`${API_URL}/checkout`, {
-          identifier: attributes.id,
-          conversation_id: currentConversationId
-        })
-        refresh()
-      } catch (err) {
-        console.error("Checkout failed", err)
-      }
+  const handleNodeClick = async (e, nodeId) => {
+    // If modifier keys are pressed, we interpret this as a selection action, 
+    // handled internally by ReactFlow. We DO NOT want to trigger a checkout/refresh
+    // because that would reset the graph state and clear the selection.
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      console.log("Modifier pressed, skipping checkout")
+      return
+    }
+    // But FlowGraph handles selection. 
+    // We should only checkout if NOT selecting?
+    // Actually, let's decouple checkout from click if we are in "selection mode" (e.g. holding ctrl/cmd done by library)
+    // BUT: ReactFlow's onNodeClick event usually fires.
+
+    // Simplify: Single click = Checkout.
+    // Shift/Ctrl + Click = Selection (handled by ReactFlow internals, we get onSelectionChange).
+
+    // However, user wants to "highlight two nodes".
+    // If we click one, it checkouts.
+    // If we want to multi-select, usage of defaults usually requires Shift-click.
+
+    // Let's implement checkout on single click ONLY if selection count <= 1?
+    // Or separate "checkout" action?
+
+    // Default behavior: Click = Checkout.
+    // Getting current selection from state.
+
+    // We'll let the user explicitly checkout via click. Selection is visual.
+    // If you select 2 nodes, clicking one might trigger checkout but selection remains.
+
+    try {
+      await axios.post(`${API_URL}/checkout`, {
+        identifier: nodeId,
+        conversation_id: currentConversationId
+      })
+      refresh()
+    } catch (err) {
+      console.error("Checkout failed", err)
     }
   }
 
@@ -303,27 +349,23 @@ function App() {
         </div>
       </div>
 
-      {/* Tree Visualization Sidebar */}
+      {/* Graph Sidebar */}
       <div className="sidebar" style={{ width: sidebarWidth }}>
         <div className="resizer" onMouseDown={startResizing} />
-        <h2>Conversation Tree</h2>
-        <div className="tree-container">
-          {treeData && (
-            <Tree
-              data={treeData}
-              orientation="vertical"
-              onNodeClick={handleNodeClick}
-              pathFunc="step"
-              translate={{ x: sidebarWidth / 2, y: 50 }}
-              collapsible={false}
-              zoomable={true}
-              scaleExtent={{ min: 0.1, max: 2 }}
-              nodeSize={{ x: 300, y: 150 }}
-              renderCustomNodeElement={(rd3tProps) => (
-                <CustomNode {...rd3tProps} onNodeClick={handleNodeClick} />
-              )}
-            />
-          )}
+        <div className="tree-header" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border-color)', height: '40px', padding: '0 10px' }}>
+          <h3 style={{ margin: 0 }}>
+            Graph {selectedNodeIds.length > 0 && <span style={{ fontSize: '0.8em', color: '#3b82f6' }}>({selectedNodeIds.length} selected)</span>}
+          </h3>
+        </div>
+
+        <div className="tree-container" style={{ height: 'calc(100% - 40px)', background: '#fff' }}>
+          {/* ReactFlow Component */}
+          <FlowGraph
+            data={graphData}
+            currentId={currentNodeId}
+            onNodeClick={handleNodeClick}
+            onSelectionChange={setSelectedNodeIds}
+          />
         </div>
       </div>
 
@@ -373,11 +415,25 @@ function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={loading || !currentConversationId}
-            placeholder={currentConversationId ? "Type a message..." : "Create a chat to start"}
+            placeholder={
+              selectedNodeIds.length === 2
+                ? "Enter merge prompt to merge selected nodes..."
+                : "Type a message..."
+            }
+            style={{
+              borderColor: selectedNodeIds.length === 2 ? '#8b5cf6' : '#ccc',
+              borderWidth: selectedNodeIds.length === 2 ? '2px' : '1px'
+            }}
             autoFocus
           />
-          <button type="submit" disabled={loading || !currentConversationId}>
-            {loading ? '...' : 'Send'}
+          <button
+            type="submit"
+            disabled={loading || !currentConversationId}
+            style={{
+              backgroundColor: selectedNodeIds.length === 2 ? '#8b5cf6' : '#2563eb'
+            }}
+          >
+            {loading ? '...' : (selectedNodeIds.length === 2 ? 'Merge & Send' : 'Send')}
           </button>
         </form>
       </div>

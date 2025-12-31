@@ -17,15 +17,31 @@ class ConversationTree:
         self.current_node = self.root
         self.api_client = APIClient(provider=provider)
 
-    def _get_all_branch_names(self) -> set:
-        names = set()
+    def get_branches_info(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of all branches with their details.
+        """
+        branches = []
         queue = [self.root]
+        visited = {self.root.id}
+        
         while queue:
             node = queue.pop(0)
             if node.branch_name:
-                names.add(node.branch_name)
-            queue.extend(node.children)
-        return names
+                 is_current_branch = False
+                 branches.append({
+                     "name": node.branch_name,
+                     "head_id": node.id, 
+                 })
+            
+            for child in node.children:
+                if child.id not in visited:
+                    visited.add(child.id)
+                    queue.append(child)
+        return branches
+
+    def _get_all_branch_names(self) -> set:
+        return {b['name'] for b in self.get_branches_info()}
 
     def add_message(self, content: str, role: str) -> None:
         """
@@ -36,6 +52,15 @@ class ConversationTree:
             role (str): The role of the message sender (user, assistant, or system).
         """
         new_node = ConversationNode(content=content, role=role)
+        
+        # Auto-fork if we are branching off a node that already has children
+        # preventing anonymous branches/divergences.
+        if self.current_node.children:
+            print(f"Auto-forking from non-leaf node {self.current_node.id}...")
+            new_branch_name = self.fork() # Auto-generates name
+            print(f"Created automatic branch: {new_branch_name}")
+            # fork() updates self.current_node to the new fork node
+            
         self.current_node.add_child(new_node)
         self.current_node = new_node
 
@@ -62,6 +87,7 @@ class ConversationTree:
                 
         fork_node = ConversationNode(content="<FORK>", role="system", branch_name=branch_name)
         self.current_node.add_child(fork_node)
+        self.current_node = fork_node
         return branch_name
 
     def merge_branches(self, target_node_id: str, merge_prompt: str) -> None:
@@ -279,6 +305,29 @@ class ConversationTree:
                     return result
             return None
         return traverse(self.root)
+
+    def get_all_nodes(self) -> List[dict]:
+        """
+        Returns a flat list of all nodes in the tree/graph.
+        Useful for visualization.
+        """
+        nodes = []
+        queue = [self.root]
+        visited = {self.root.id}
+        
+        while queue:
+            node = queue.pop(0)
+            nodes.append(node.to_dict())
+            
+            for child in node.children:
+                if child.id not in visited:
+                    visited.add(child.id)
+                    queue.append(child)
+        
+        # Sort by timestamp to help visualization libraries replay history
+        # (Assuming nodes have generic ISO timestamps, sort should work)
+        nodes.sort(key=lambda x: x.get('timestamp', ''))
+        return nodes
 
     def find_branch_head(self, branch_name: str) -> Optional[ConversationNode]:
         """

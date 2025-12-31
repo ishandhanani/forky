@@ -1,0 +1,31 @@
+.react-flow__node {
+    font-family: 'Inter', sans-serif;
+}
+
+.react-flow__controls {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    border: 1px solid #334155;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.react-flow__controls-button {
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    color: #f1f5f9;
+}
+
+.react-flow__controls-button:hover {
+    background: #334155;
+}
+
+.react-flow__controls-button svg {
+    fill: #f1f5f9;
+}
+
+.react-flow__attribution {
+    background: rgba(255, 255, 255, 0.5);
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 10px;
+}
