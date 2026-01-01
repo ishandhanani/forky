@@ -121,9 +121,6 @@ def list_conversations():
                     "id": file_id,
                     "name": file_id, # Could improve naming later
                     "updated_at": mtime,
-                    "id": file_id,
-                    "name": file_id, # Could improve naming later
-                    "updated_at": mtime,
                     # "is_active": False # Concept of active is client-side now
                 })
             except Exception:
@@ -140,6 +137,9 @@ def create_conversation(request: CreateConversationRequest):
     file_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
     # sanitize filename
     file_id = "".join(c for c in file_id if c.isalnum() or c in ('-', '_'))
+
+    if not file_id:
+        file_id = f"conv-{uuid.uuid4().hex[:8]}"
     
     path = get_file_path(file_id)
     if os.path.exists(path):
@@ -149,16 +149,12 @@ def create_conversation(request: CreateConversationRequest):
     tree = ConversationTree(provider=PROVIDER)
     tree.save_to_file(path)
     
-    tree.save_to_file(path)
-    
     return {"id": file_id, "message": "Conversation created"}
 
 @app.post("/conversations/{file_id}/load") # Kept for compat, but essentially a verify endpoint
 def load_conversation(file_id: str):
     """Verifies that the conversation exists."""
     path = get_file_path(file_id)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Conversation not found")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Conversation not found")
     
@@ -195,7 +191,7 @@ def get_tree(conversation_id: Optional[str] = None):
     return {
         "root": serialize_node(tree.root),
         "current_node_id": tree.current_node.id,
-        "conversation_id": target_id
+        "conversation_id": conversation_id
     }
 
 @app.get("/graph")

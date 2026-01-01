@@ -76,21 +76,7 @@ You can also run the web interface for a richer visualization:
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. Here are some things I'd like to add:
-- [ ] Branching: Implement named forks and also persistence of forks.
-- [ ] Checkout: Add ability to switch between different branches or specific conversation points.
-- [ ] Rebase: Allow reorganizing and combining conversation branches.
-- [ ] Cherry-pick: Implement selecting and applying specific messages from other branches.
-- [ ] Stash: Add functionality to temporarily save and reapply uncommitted changes.
-- [ ] Tags: Allow marking significant points in the conversation history.
-- [ ] Diff: Create a tool to compare differences between branches or commits.
-- [ ] Reset: Implement the ability to move the conversation back to a previous state.
-- [ ] LLMs: Support other LLM models besides Claude
-
-## Open questions 
-
-- [ ] Should each node should be a user/assistant exchange, not just a single message
-- [ ] Should this be extended in a way where a chat is treated as a file therefore allowing for git native operations? (Hint: yes)
+Contributions are welcome! Please feel free to submit a Pull Request. 
 
 ## License
 

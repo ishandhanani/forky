@@ -310,9 +310,10 @@ const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
                 fitView
                 attributionPosition="bottom-left"
                 minZoom={0.1}
+                style={{ backgroundColor: '#020617' }}
             >
                 <Controls />
-                <Background color="#aaa" gap={16} />
+                <Background color="#334155" gap={20} size={1} />
             </ReactFlow>
         </div>
     );
