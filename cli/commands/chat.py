@@ -4,6 +4,13 @@ import os
 DEFAULT_STATE_FILE = ".forky_state.json"
 
 def handle_chat(args):
+    """
+    Main entry point for the chat command.
+    Handles the interactive chat loop, command processing, and conversation management.
+
+    Args:
+        args: Command line arguments containing provider, file, etc.
+    """
     state_file = args.file if hasattr(args, 'file') and args.file else DEFAULT_STATE_FILE
     
     if os.path.exists(state_file):
@@ -57,14 +64,26 @@ def handle_chat(args):
                         tree.save_to_file(state_file)
                     else:
                         print(f"Could not find branch or node with identifier '{identifier}'.")
-            elif user_input.lower() == '/merge':
-                try:
-                    merge_prompt = input("Enter a prompt for the merge summary (optional): ").strip()
-                    tree.merge(merge_prompt)
-                    print("Merged the fork back into the main conversation. You are now in the main conversation.")
-                    tree.save_to_file(state_file)
-                except ValueError as e:
-                    print(f"Error: {e}")
+            elif user_input.lower().startswith('/merge'):
+                # Usage: /merge <branch_name> [prompt]
+                parts = user_input.split(maxsplit=2)
+                if len(parts) < 2:
+                    print("Usage: /merge <branch_name> [optional_prompt]")
+                else:
+                    target_branch = parts[1]
+                    merge_prompt = parts[2] if len(parts) > 2 else "Merge branch context"
+                    
+                    try:
+                        # We need to find the node ID for the tip of the target branch
+                        target_node = tree.find_branch_head(target_branch)
+                        if target_node:
+                             tree.merge_branches(target_node.id, merge_prompt)
+                             print(f"Merged branch '{target_branch}' into current conversation.")
+                             tree.save_to_file(state_file)
+                        else:
+                            print(f"Branch '{target_branch}' not found.")
+                    except ValueError as e:
+                        print(f"Error: {e}")
             elif user_input.lower() == '/visualize':
                 visualize_tree(tree)
             elif user_input.lower() == '/history':
@@ -83,6 +102,9 @@ def handle_chat(args):
             tree.save_to_file(state_file)
 
 def show_full_history(tree):
+    """
+    Displays the full linear history of the current branch in the conversation.
+    """
     history = tree.get_conversation_history()
     print("\nFull Conversation History:")
     for message in history:
@@ -92,11 +114,17 @@ def show_full_history(tree):
         print(f"{message['role'].capitalize()}: {content}")
 
 def visualize_tree(tree):
+    """
+    Prints an ASCII representation of the conversation tree structure.
+    """
     ascii_tree = tree.generate_ascii_tree()
     print("\nConversation Tree Visualization:")
     print(ascii_tree)
 
 def show_status(tree):
+    """
+    Displays the current state (current branch context and fork status).
+    """
     print("\nCurrent conversation state:")
     messages = tree.get_flat_conversation()
     for message in messages:
