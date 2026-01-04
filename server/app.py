@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
 from core.conversation_tree import ConversationTree
+from core import database as db
 
 app = FastAPI(
     title="Forky API",
@@ -21,50 +22,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# State management
-DATA_DIR = ".forky_conversations"
-os.makedirs(DATA_DIR, exist_ok=True)
+# Provider configuration
 PROVIDER = "openai" 
 
-# Stateless approach: file ID is passed in requests
 
-def get_file_path(file_id):
-    """Returns the full file path for a given conversation ID."""
-    return os.path.join(DATA_DIR, f"{file_id}.json")
+@app.on_event("startup")
+def startup_event():
+    """Initialize database and run migrations on server startup."""
+    db.init_db()
+    migrated = db.migrate_json_to_sqlite()
+    if migrated > 0:
+        print(f"Migrated {migrated} conversations from JSON to SQLite")
 
-def load_tree(file_id=None):
+
+def load_tree(conversation_id: str = None) -> ConversationTree:
     """
-    Loads a conversation tree from disk.
+    Loads a conversation tree from the database.
     
-    If file_id is provided, loads that specific conversation.
+    If conversation_id is provided, loads that specific conversation.
     Otherwise, defaults to the most recently modified conversation.
-    Does NOT maintain global state.
     """
-    target_id = file_id
-    
-    if not target_id:
-        # If no explicit file_id, try to find the most recent one or create default
-        files = [f for f in os.listdir(DATA_DIR) if f.endswith(".json")]
-        if files:
-            # Sort by mtime descending
-            files.sort(key=lambda x: os.path.getmtime(os.path.join(DATA_DIR, x)), reverse=True)
-            target_id = files[0].replace(".json", "")
+    if not conversation_id:
+        # Get most recent conversation
+        conversations = db.list_conversations()
+        if conversations:
+            conversation_id = conversations[0]["id"]
         else:
-            target_id = "default"
+            conversation_id = "default"
+            db.create_conversation(conversation_id)
     
-    path = get_file_path(target_id)
-    # If path doesn't exist and it's 'default', load_from_file handles it by returning new tree
-    # If path doesn't exist and it's specific ID, load_from_file also handles it (returns empty tree currently)
-    # But ideally we might want to 404 if specific ID missing? 
-    # Current behavior of load_from_file: "if not os.path.exists... return cls(provider)". 
-    # This might hide 404s. But for now, we invoke it.
-    
-    return ConversationTree.load_from_file(path, provider=PROVIDER)
+    return ConversationTree.load_from_db(conversation_id, provider=PROVIDER)
 
-def save_tree(tree, file_id):
-    """Saves the given conversation tree to the specified file ID."""
-    path = get_file_path(file_id)
-    tree.save_to_file(path)
+
+def save_tree(tree: ConversationTree, conversation_id: str) -> None:
+    """Saves the given conversation tree to the database."""
+    tree.save_to_db(conversation_id)
 
 # Data models
 class MessageRequest(BaseModel):
@@ -105,67 +97,58 @@ class CreateConversationRequest(BaseModel):
 @app.get("/conversations")
 def list_conversations():
     """Lists all available conversations, sorted by last update time."""
-    conversations = []
-    if not os.path.exists(DATA_DIR):
-        return {"conversations": []}
-        
-    for filename in os.listdir(DATA_DIR):
-        if filename.endswith(".json"):
-            file_id = filename.replace(".json", "")
-            path = os.path.join(DATA_DIR, filename)
-            try:
-                # We could load the tree to get the root content as a title, but that's expensive
-                # checking mtime for sorting
-                mtime = os.path.getmtime(path)
-                conversations.append({
-                    "id": file_id,
-                    "name": file_id, # Could improve naming later
-                    "updated_at": mtime,
-                    # "is_active": False # Concept of active is client-side now
-                })
-            except Exception:
-                continue
-                
-    # Sort by updated_at desc
-    conversations.sort(key=lambda x: x["updated_at"], reverse=True)
+    conversations = db.list_conversations()
     return {"conversations": conversations}
 
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest):
     """Creates a new empty conversation with an optional name."""
     import uuid
-    file_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
-    # sanitize filename
-    file_id = "".join(c for c in file_id if c.isalnum() or c in ('-', '_'))
+    conversation_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
+    # sanitize
+    conversation_id = "".join(c for c in conversation_id if c.isalnum() or c in ('-', '_'))
 
-    if not file_id:
-        file_id = f"conv-{uuid.uuid4().hex[:8]}"
+    if not conversation_id:
+        conversation_id = f"conv-{uuid.uuid4().hex[:8]}"
     
-    path = get_file_path(file_id)
-    if os.path.exists(path):
-         raise HTTPException(status_code=400, detail="Conversation already exists")
-         
-    # Create new empty tree
+    if db.conversation_exists(conversation_id):
+        raise HTTPException(status_code=400, detail="Conversation already exists")
+    
+    # Create new empty tree and save to database
     tree = ConversationTree(provider=PROVIDER)
-    tree.save_to_file(path)
+    tree.save_to_db(conversation_id)
     
-    return {"id": file_id, "message": "Conversation created"}
+    return {"id": conversation_id, "message": "Conversation created"}
 
-@app.post("/conversations/{file_id}/load") # Kept for compat, but essentially a verify endpoint
-def load_conversation(file_id: str):
+@app.post("/conversations/{conversation_id}/load")
+def load_conversation(conversation_id: str):
     """Verifies that the conversation exists."""
-    path = get_file_path(file_id)
-    if not os.path.exists(path):
+    if not db.conversation_exists(conversation_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
     
-    return {"id": file_id, "message": "Conversation loaded"}
+    return {"id": conversation_id, "message": "Conversation loaded"}
 
-@app.delete("/conversations/{file_id}")
-def delete_conversation(file_id: str):
+
+class RenameConversationRequest(BaseModel):
+    """Request model for renaming a conversation."""
+    name: str
+
+
+@app.patch("/conversations/{conversation_id}")
+def rename_conversation(conversation_id: str, request: RenameConversationRequest):
+    """Renames a conversation."""
+    if not request.name or not request.name.strip():
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    
+    if db.rename_conversation(conversation_id, request.name.strip()):
+        return {"id": conversation_id, "name": request.name.strip(), "message": "Conversation renamed"}
+    raise HTTPException(status_code=404, detail="Conversation not found")
+
+
+@app.delete("/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str):
     """Deletes a conversation by its ID."""
-    path = get_file_path(file_id)
-    if os.path.exists(path):
-        os.remove(path)
+    if db.delete_conversation(conversation_id):
         return {"message": "Conversation deleted"}
     raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -229,8 +212,7 @@ def chat(request: MessageRequest):
                 yield chunk
             
             # Save after completion
-            path = get_file_path(request.conversation_id)
-            tree.save_to_file(path)
+            tree.save_to_db(request.conversation_id)
         except Exception as e:
             # In a stream, we can't easily raise HTTP exception once started, 
             # but we can log or yield an error message if caught early.
@@ -256,8 +238,7 @@ def checkout(request: CheckoutRequest):
         except ValueError as e:
              raise HTTPException(status_code=400, detail=str(e))
     
-    path = get_file_path(request.conversation_id)
-    tree.save_to_file(path)
+    tree.save_to_db(request.conversation_id)
     return {"message": msg, "current_node_id": tree.current_node.id}
 
 @app.post("/fork")
@@ -266,8 +247,7 @@ def fork(request: ForkRequest):
     tree = load_tree(request.conversation_id)
     try:
         branch_name = tree.fork(request.branch_name)
-        path = get_file_path(request.conversation_id)
-        tree.save_to_file(path)
+        tree.save_to_db(request.conversation_id)
         return {"branch_name": branch_name}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -282,11 +262,58 @@ def merge_branches(request: MergeBranchesRequest):
     tree = load_tree(request.conversation_id)
     try:
         tree.merge_branches(request.target_node_id, request.merge_prompt)
-        path = get_file_path(request.conversation_id)
-        tree.save_to_file(path)
+        tree.save_to_db(request.conversation_id)
         return {"message": "Branches merged successfully", "new_node_id": tree.current_node.id}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class DeleteNodeRequest(BaseModel):
+    """Request model for deleting a node."""
+    node_id: str
+    conversation_id: str
+
+
+@app.post("/delete_node")
+def delete_node(request: DeleteNodeRequest):
+    """
+    Deletes a node (or turn pair) from the conversation tree.
+    
+    If deleting an assistant node with a user parent, both are deleted.
+    Only works for nodes with exactly one parent (not merge results).
+    Children are inherited by the ancestor.
+    """
+    # Check if node has single parent
+    parents = db.get_node_parents(request.node_id)
+    
+    if len(parents) == 0:
+        raise HTTPException(status_code=400, detail="Cannot delete root node")
+    
+    if len(parents) > 1:
+        raise HTTPException(status_code=400, detail="Cannot delete merge node (has multiple parents)")
+    
+    # For turn pairs: also check if the user parent (which we'll delete too) has multiple parents
+    # This is a merged node in the UI sense
+    parent_id = parents[0]
+    parent_parents = db.get_node_parents(parent_id)
+    if len(parent_parents) > 1:
+        raise HTTPException(status_code=400, detail="Cannot delete turn that resulted from a merge (user node has multiple parents)")
+    
+    # Check if this is the current node or its user parent - if so, we'll need to update
+    tree = load_tree(request.conversation_id)
+    current_id = tree.current_node.id
+    
+    success, actual_parent_id = db.delete_node(request.node_id)
+    
+    if success:
+        # If current node was deleted (either the target node or its user parent), move to actual parent
+        # Check if current node still exists
+        if current_id == request.node_id or current_id == parents[0]:
+            db.set_conversation_current_node(request.conversation_id, actual_parent_id)
+        
+        return {"message": "Node deleted", "parent_id": actual_parent_id}
+    
+    raise HTTPException(status_code=404, detail="Node not found")
 
 if __name__ == "__main__":
     import uvicorn

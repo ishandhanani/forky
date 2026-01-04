@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from .conversation_node import ConversationNode
 from .api_client import APIClient
+from . import database as db
 
 class ConversationTree:
     """
@@ -573,3 +574,103 @@ class ConversationTree:
                 # Fallback if path is invalid (shouldn't happen with consistent data)
                 break
         return current
+
+    # --- SQLite Database Methods ---
+
+    def save_to_db(self, conversation_id: str) -> None:
+        """
+        Saves the conversation tree to the SQLite database.
+
+        Args:
+            conversation_id: The unique identifier for this conversation.
+        """
+        # Ensure conversation exists
+        if not db.conversation_exists(conversation_id):
+            db.create_conversation(conversation_id)
+
+        # Flatten tree and save all nodes
+        nodes_map = self._flatten_tree()
+
+        # First pass: save all nodes
+        for node_id, node_data in nodes_map.items():
+            db.save_node(
+                conversation_id=conversation_id,
+                node_id=node_id,
+                content=node_data["content"],
+                role=node_data["role"],
+                branch_name=node_data.get("branch_name"),
+                timestamp=node_data.get("timestamp")
+            )
+        
+        # Second pass: save all edges (after all nodes exist)
+        for node_id, node_data in nodes_map.items():
+            for child_id in node_data.get("children_ids", []):
+                db.add_edge(node_id, child_id)
+
+        # Update current node pointer
+        db.set_conversation_current_node(conversation_id, self.current_node.id)
+
+    @classmethod
+    def load_from_db(cls, conversation_id: str, provider: str = "anthropic") -> 'ConversationTree':
+        """
+        Loads the conversation tree from the SQLite database.
+
+        Args:
+            conversation_id: The unique identifier for the conversation.
+            provider: The LLM provider to use.
+
+        Returns:
+            ConversationTree: The loaded conversation tree.
+        """
+        tree = cls(provider=provider)
+
+        if not db.conversation_exists(conversation_id):
+            return tree
+
+        # Load all nodes
+        nodes_data = db.get_all_nodes(conversation_id)
+
+        if not nodes_data:
+            return tree
+
+        # Instantiate nodes
+        loaded_nodes = {}
+        for node_id, node_data in nodes_data.items():
+            loaded_nodes[node_id] = ConversationNode(
+                id=node_id,
+                content=node_data["content"],
+                role=node_data["role"],
+                branch_name=node_data.get("branch_name"),
+                timestamp=datetime.fromisoformat(node_data["timestamp"]) if node_data.get("timestamp") else datetime.now()
+            )
+
+        # Re-link parent-child relationships
+        for node_id, node_data in nodes_data.items():
+            node = loaded_nodes[node_id]
+            for child_id in node_data.get("children_ids", []):
+                if child_id in loaded_nodes:
+                    node.add_child(loaded_nodes[child_id])
+
+        # Find root (node with no parents)
+        root_id = db.find_root_node_id(conversation_id)
+        if root_id and root_id in loaded_nodes:
+            tree.root = loaded_nodes[root_id]
+        else:
+            # Fallback: find node with no parents
+            for node_id, node in loaded_nodes.items():
+                if not node.parents:
+                    tree.root = node
+                    break
+
+        # Ensure root has branch name
+        if tree.root and not tree.root.branch_name:
+            tree.root.branch_name = "master"
+
+        # Set current node
+        current_node_id = db.get_conversation_current_node(conversation_id)
+        if current_node_id and current_node_id in loaded_nodes:
+            tree.current_node = loaded_nodes[current_node_id]
+        else:
+            tree.current_node = tree.root
+
+        return tree

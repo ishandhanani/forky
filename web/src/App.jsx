@@ -138,6 +138,20 @@ function App() {
     }
   }
 
+  const handleRenameConversation = async (e, id, currentName) => {
+    e.stopPropagation()
+    const newName = window.prompt("Enter new name:", currentName)
+    if (!newName || newName.trim() === '' || newName === currentName) return
+
+    try {
+      await axios.patch(`${API_URL}/conversations/${id}`, { name: newName.trim() })
+      await fetchConversations()
+    } catch (err) {
+      console.error("Rename failed", err)
+      alert('Failed to rename conversation')
+    }
+  }
+
   const fetchGraph = useCallback(async () => {
     if (!currentConversationId) return;
     try {
@@ -322,6 +336,22 @@ function App() {
     }
   }
 
+  const handleDeleteNode = async (nodeId) => {
+    if (!window.confirm("Delete this node? Children will be inherited by parent.")) return
+
+    try {
+      await axios.post(`${API_URL}/delete_node`, {
+        node_id: nodeId,
+        conversation_id: currentConversationId
+      })
+      setSelectedNodeIds([])
+      refresh()
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message
+      alert(`Cannot delete node: ${msg}`)
+    }
+  }
+
   return (
     <div className="container">
       {/* Navigation Sidebar */}
@@ -334,12 +364,22 @@ function App() {
               className={`nav-item ${conv.id === currentConversationId ? 'active' : ''}`}
               onClick={() => handleSelectConversation(conv.id)}
             >
-              <span>{conv.name.substring(0, 15)}</span>
-              <span
-                onClick={(e) => handleDeleteConversation(e, conv.id)}
-                style={{ opacity: 0.5, fontSize: '0.8rem' }}
-              >
-                ✕
+              <span className="nav-item-name" title={conv.name}>{conv.name.length > 18 ? conv.name.substring(0, 18) + '...' : conv.name}</span>
+              <span className="nav-item-actions">
+                <span
+                  onClick={(e) => handleRenameConversation(e, conv.id, conv.name)}
+                  style={{ opacity: 0.5, fontSize: '0.8rem', marginRight: '6px', cursor: 'pointer' }}
+                  title="Rename"
+                >
+                  ✏️
+                </span>
+                <span
+                  onClick={(e) => handleDeleteConversation(e, conv.id)}
+                  style={{ opacity: 0.5, fontSize: '0.8rem', cursor: 'pointer' }}
+                  title="Delete"
+                >
+                  ✕
+                </span>
               </span>
             </li>
           ))}
@@ -352,10 +392,27 @@ function App() {
       {/* Graph Sidebar */}
       <div className="sidebar" style={{ width: sidebarWidth }}>
         <div className="resizer" onMouseDown={startResizing} />
-        <div className="tree-header" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border-color)', height: '40px', padding: '0 10px' }}>
+        <div className="tree-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', height: '40px', padding: '0 10px' }}>
           <h3 style={{ margin: 0 }}>
             Graph {selectedNodeIds.length > 0 && <span style={{ fontSize: '0.8em', color: '#3b82f6' }}>({selectedNodeIds.length} selected)</span>}
           </h3>
+          {selectedNodeIds.length === 1 && (
+            <button
+              onClick={() => handleDeleteNode(selectedNodeIds[0])}
+              style={{
+                background: '#ef4444',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '4px 10px',
+                fontSize: '0.8rem',
+                cursor: 'pointer'
+              }}
+              title="Delete selected node"
+            >
+              🗑️ Delete Node
+            </button>
+          )}
         </div>
 
         <div className="tree-container" style={{ height: 'calc(100% - 40px)', background: '#fff' }}>
