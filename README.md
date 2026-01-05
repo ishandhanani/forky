@@ -1,83 +1,136 @@
-# Forky: Git-style Conversation Structure for LLMs 
+# Forky: Git-style Conversation Management for LLMs
 
 ![forky](forky.webp)
 
-Forky is a command-line interface (CLI) tool that implements a git-style conversation structure for interactions with the Claude API. It allows users to create, manage, and navigate through branching conversations, providing a unique way to explore different conversation paths with an AI assistant.
+Forky is a conversation management tool that implements git-style branching and merging for LLM interactions. It provides a DAG (Directed Acyclic Graph) structure for conversations, allowing you to fork, explore alternatives, and merge conversation branches with semantic three-way merge.
 
 ## Features
 
-- **Conversation Tree Structure**: Manage conversations in a tree-like structure, allowing for branching and merging of dialogue paths.
-- **Forking**: Create new branches in the conversation to explore alternative dialogue paths.
-- **Merging**: Combine forked conversations back into the main thread with automatic summarization.
-- **CLI Interface**: Easy-to-use command-line interface for interacting with the conversation tree.
-- **Visualization**: ASCII-based tree visualization of the conversation structure.
-- **History Tracking**: View and manage the full conversation history.
+### Core
+- **Conversation DAG**: Manage conversations as a graph with branching and merging
+- **Forking**: Create branches to explore alternative dialogue paths
+- **Three-Way Semantic Merge**: Merge branches with LCA computation, state summarization, and conflict detection
+- **Multi-Provider Support**: Works with Anthropic (Claude) and OpenAI (GPT) models
+
+### Interface
+- **Web UI**: React-based interface with interactive graph visualization
+- **CLI**: Command-line interface for terminal-based interaction
+- **Real-time Streaming**: Streaming responses from LLMs
+
+### Merge System
+- **LCA Computation**: Finds lowest common ancestor for proper three-way merge
+- **State Summarization**: Extracts facts, decisions, assumptions from conversation
+- **Semantic Diffing**: Computes what changed in each branch
+- **Conflict Detection**: Identifies and reports merge conflicts
 
 ## Installation
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/ishandhanani/forky.git
-   cd forky
-   ```
+```bash
+git clone https://github.com/yourusername/forky.git
+cd forky
+pip install -r requirements.txt
+```
 
-2. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. Set up your Anthropic API key:
-   - Create a `.env` file in the project root.
-   - Add your API key: `ANTHROPIC_API_KEY=your_api_key_here`
+Create `.env` file:
+```
+ANTHROPIC_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here  # optional
+```
 
 ## Usage
 
+### Web Interface (Recommended)
+
+1. **Start Backend**:
+   ```bash
+   export PYTHONPATH=$PYTHONPATH:.
+   python3 server/app.py
+   ```
+   Server runs on `http://localhost:8000`
+
+2. **Start Frontend**:
+   ```bash
+   cd web
+   npm install  # first time only
+   npm run dev
+   ```
+   Web app runs on `http://localhost:5173`
+
+![frontend](frontend_example.png)
+
+**Graph Interactions:**
+- Click node → checkout to that point
+- Cmd/Ctrl+Click → multi-select nodes
+- Select 2 nodes → merge mode (purple input border)
+
 ### CLI
-Run the CLI application:
+
 ```bash
 python -m cli.main chat
 ```
 
-### Web Interface (Beta)
-You can also run the web interface for a richer visualization:
-
-![frontend](frontend_example.png)
-
-1. **Start the Backend Server**:
-   ```bash
-   export PYTHONPATH=$PYTHONPATH:. 
-   python3 server/app.py
-   ```
-   The server runs on `http://localhost:8000`.
-
-2. **Start the Frontend**:
-   ```bash
-   cd web
-   npm install  # First time only
-   npm run dev
-   ```
-   The web app runs on `http://localhost:5173`.
-
-### Commands
-- Type your message to chat with Claude
-- `/fork`: Create a new branch in the conversation
-- `/merge`: Merge the current branch back into the main conversation
-- `/status`: View the current conversation state
-- `/visualize`: See an ASCII representation of the conversation tree
-- `/history`: View the full conversation history
-- `quit`: Exit the application
+**Commands:**
+- `/fork [name]` - Create new branch
+- `/merge <branch> [prompt]` - Merge branch with three-way semantic merge
+- `/checkout <id|branch>` - Switch to node or branch
+- `/status` - View current state
+- `/visualize` - ASCII tree visualization
+- `/history` - Full conversation history
+- `quit` - Exit
 
 ## Project Structure
 
-- `api_client.py`: Handles communication with the Claude API
-- `cli.py`: Implements the command-line interface
-- `conversation_node.py`: Defines the ConversationNode class for tree structure
-- `conversation_tree.py`: Manages the overall conversation tree and operations
+```
+forky/
+├── core/
+│   ├── api_client.py        # LLM API communication (Anthropic/OpenAI)
+│   ├── conversation_node.py # Node class with merge metadata
+│   ├── conversation_tree.py # Tree/DAG operations, merge logic
+│   ├── database.py          # SQLite persistence
+│   ├── merge_utils.py       # LCA computation, eligibility checks
+│   ├── state_summary.py     # LLM-based state summarization
+│   ├── semantic_diff.py     # Semantic diff between states
+│   └── merge_executor.py    # Three-way merge execution
+├── server/
+│   └── app.py               # FastAPI backend
+├── web/
+│   └── src/
+│       ├── App.jsx          # Main React app
+│       └── components/
+│           └── FlowGraph.jsx # ReactFlow graph visualization
+└── cli/
+    └── commands/
+        └── chat.py          # CLI chat command
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/conversations` | GET | List all conversations |
+| `/conversations` | POST | Create new conversation |
+| `/graph` | GET | Get DAG structure for visualization |
+| `/history` | GET | Get linear history to current node |
+| `/chat` | POST | Send message, get streaming response |
+| `/checkout` | POST | Switch to node/branch |
+| `/fork` | POST | Create new branch |
+| `/check_merge_eligibility` | POST | Check if two nodes can be merged |
+| `/merge_branches` | POST | Execute three-way semantic merge |
+| `/delete_node` | POST | Delete node (inherits children to parent) |
+
+## Three-Way Merge
+
+When merging two branches, Forky:
+
+1. **Computes LCA** - Finds the lowest common ancestor
+2. **Validates** - Blocks ancestor/descendant merges  
+3. **Summarizes States** - Extracts structured state for LCA, branch A, branch B
+4. **Computes Diffs** - What changed from LCA to each branch
+5. **Merges** - Combines changes, detects conflicts
+6. **Responds** - LLM generates response with merged context
+
+Conflicts are reported but not auto-resolved - the LLM is informed and may ask for clarification.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Contributions welcome! Please submit a Pull Request.
