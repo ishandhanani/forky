@@ -73,9 +73,26 @@ def init_db() -> None:
                 role TEXT NOT NULL,
                 branch_name TEXT,
                 timestamp TIMESTAMP,
+                node_type TEXT DEFAULT 'message',
+                merge_metadata TEXT,
+                state_summary_cache TEXT,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
+        
+        # Migration: add new columns if they don't exist
+        try:
+            cursor.execute("ALTER TABLE nodes ADD COLUMN node_type TEXT DEFAULT 'message'")
+        except Exception:
+            pass  # Column already exists
+        try:
+            cursor.execute("ALTER TABLE nodes ADD COLUMN merge_metadata TEXT")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE nodes ADD COLUMN state_summary_cache TEXT")
+        except Exception:
+            pass
         
         # Edges table (parent-child relationships for DAG)
         cursor.execute("""
@@ -330,7 +347,9 @@ def set_conversation_current_node(conversation_id: str, node_id: str) -> None:
 # --- Node Operations ---
 
 def save_node(conversation_id: str, node_id: str, content: str, role: str,
-              branch_name: Optional[str] = None, timestamp: Optional[str] = None) -> None:
+              branch_name: Optional[str] = None, timestamp: Optional[str] = None,
+              node_type: str = "message", merge_metadata: Optional[str] = None,
+              state_summary_cache: Optional[str] = None) -> None:
     """
     Saves or updates a node in the database.
     
@@ -341,14 +360,18 @@ def save_node(conversation_id: str, node_id: str, content: str, role: str,
         role: user, assistant, or system.
         branch_name: Optional branch name for fork nodes.
         timestamp: ISO format timestamp.
+        node_type: 'message' or 'merge'.
+        merge_metadata: JSON string of merge metadata.
+        state_summary_cache: JSON string of cached state summary.
     """
     ts = timestamp or datetime.now().isoformat()
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO nodes (id, conversation_id, content, role, branch_name, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (node_id, conversation_id, content, role, branch_name, ts))
+            INSERT OR REPLACE INTO nodes 
+            (id, conversation_id, content, role, branch_name, timestamp, node_type, merge_metadata, state_summary_cache)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (node_id, conversation_id, content, role, branch_name, ts, node_type, merge_metadata, state_summary_cache))
 
 
 def get_all_nodes(conversation_id: str) -> Dict[str, Dict]:
@@ -363,7 +386,7 @@ def get_all_nodes(conversation_id: str) -> Dict[str, Dict]:
         
         # Get nodes
         cursor.execute("""
-            SELECT id, content, role, branch_name, timestamp 
+            SELECT id, content, role, branch_name, timestamp, node_type, merge_metadata, state_summary_cache
             FROM nodes 
             WHERE conversation_id = ?
         """, (conversation_id,))
@@ -376,6 +399,9 @@ def get_all_nodes(conversation_id: str) -> Dict[str, Dict]:
                 "role": row["role"],
                 "branch_name": row["branch_name"],
                 "timestamp": row["timestamp"],
+                "node_type": row["node_type"] or "message",
+                "merge_metadata": row["merge_metadata"],
+                "state_summary_cache": row["state_summary_cache"],
                 "children_ids": [],
                 "parent_ids": []
             }

@@ -2,7 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from .conversation_node import ConversationNode
 from .api_client import APIClient
 from . import database as db
@@ -713,13 +713,25 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
 
         # First pass: save all nodes
         for node_id, node_data in nodes_map.items():
+            # Serialize merge_metadata and state_summary_cache to JSON strings
+            merge_metadata_json = None
+            if node_data.get("merge_metadata"):
+                merge_metadata_json = json.dumps(node_data["merge_metadata"])
+            
+            state_summary_json = None
+            if node_data.get("state_summary_cache"):
+                state_summary_json = json.dumps(node_data["state_summary_cache"])
+            
             db.save_node(
                 conversation_id=conversation_id,
                 node_id=node_id,
                 content=node_data["content"],
                 role=node_data["role"],
                 branch_name=node_data.get("branch_name"),
-                timestamp=node_data.get("timestamp")
+                timestamp=node_data.get("timestamp"),
+                node_type=node_data.get("node_type", "message"),
+                merge_metadata=merge_metadata_json,
+                state_summary_cache=state_summary_json
             )
         
         # Second pass: save all edges (after all nodes exist)
@@ -756,12 +768,30 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
         # Instantiate nodes
         loaded_nodes = {}
         for node_id, node_data in nodes_data.items():
+            # Deserialize merge_metadata and state_summary_cache from JSON
+            merge_metadata = None
+            if node_data.get("merge_metadata"):
+                try:
+                    merge_metadata = json.loads(node_data["merge_metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            state_summary_cache = None
+            if node_data.get("state_summary_cache"):
+                try:
+                    state_summary_cache = json.loads(node_data["state_summary_cache"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
             loaded_nodes[node_id] = ConversationNode(
                 id=node_id,
                 content=node_data["content"],
                 role=node_data["role"],
                 branch_name=node_data.get("branch_name"),
-                timestamp=datetime.fromisoformat(node_data["timestamp"]) if node_data.get("timestamp") else datetime.now()
+                timestamp=datetime.fromisoformat(node_data["timestamp"]) if node_data.get("timestamp") else datetime.now(),
+                node_type=node_data.get("node_type", "message"),
+                merge_metadata=merge_metadata,
+                state_summary_cache=state_summary_cache
             )
 
         # Re-link parent-child relationships

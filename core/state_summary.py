@@ -137,21 +137,9 @@ def generate_state_summary(
     try:
         response = api_client.get_response(prompt, [])
         
-        # Parse JSON from response
-        # Try to extract JSON if wrapped in markdown code block
-        json_str = response.strip()
-        if json_str.startswith("```"):
-            # Remove markdown code block
-            lines = json_str.split("\n")
-            json_lines = []
-            in_block = False
-            for line in lines:
-                if line.startswith("```"):
-                    in_block = not in_block
-                    continue
-                if in_block or not line.startswith("```"):
-                    json_lines.append(line)
-            json_str = "\n".join(json_lines)
+        # Parse JSON from response - use shared utility
+        from .merge_utils_shared import extract_json_from_markdown
+        json_str = extract_json_from_markdown(response)
         
         data = json.loads(json_str)
         return StateSummary.from_dict(data)
