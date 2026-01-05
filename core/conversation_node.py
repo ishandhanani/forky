@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
@@ -18,6 +18,11 @@ class ConversationNode:
     timestamp: datetime = field(default_factory=datetime.now)
     children: List['ConversationNode'] = field(default_factory=list)
     parents: List['ConversationNode'] = field(default_factory=list)
+    
+    # Three-way merge support
+    node_type: str = "message"  # "message" | "merge"
+    merge_metadata: Optional[Dict[str, Any]] = None  # For merge nodes: {base_id, merged_state, conflicts, provenance}
+    state_summary_cache: Optional[Dict[str, Any]] = None  # Cached StateSummary for this node
 
     @property
     def parent(self) -> Optional['ConversationNode']:
@@ -87,7 +92,10 @@ class ConversationNode:
             "branch_name": self.branch_name,
             "timestamp": self.timestamp.isoformat(),
             "children_ids": [child.id for child in self.children],
-            "parent_ids": [p.id for p in self.parents]
+            "parent_ids": [p.id for p in self.parents],
+            "node_type": self.node_type,
+            "merge_metadata": self.merge_metadata,
+            "state_summary_cache": self.state_summary_cache
         }
 
     @classmethod
@@ -100,8 +108,17 @@ class ConversationNode:
             content=data["content"],
             role=data["role"],
             branch_name=data.get("branch_name"),
-            timestamp=datetime.fromisoformat(data["timestamp"])
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            node_type=data.get("node_type", "message"),
+            merge_metadata=data.get("merge_metadata"),
+            state_summary_cache=data.get("state_summary_cache")
         )
+    
+    def is_merge_node(self) -> bool:
+        """
+        Returns True if this is a merge node.
+        """
+        return self.node_type == "merge" or len(self.parents) > 1
 
     def __str__(self) -> str:
         """

@@ -88,6 +88,12 @@ class MergeBranchesRequest(BaseModel):
     merge_prompt: str
     conversation_id: str
 
+class MergeEligibilityRequest(BaseModel):
+    """Request model for checking merge eligibility."""
+    node_a_id: str
+    node_b_id: str
+    conversation_id: str
+
 class CreateConversationRequest(BaseModel):
     """Request model for creating a new conversation."""
     name: Optional[str] = None
@@ -254,16 +260,47 @@ def fork(request: ForkRequest):
 
 
 
+@app.post("/check_merge_eligibility")
+def check_merge_eligibility(request: MergeEligibilityRequest):
+    """
+    Checks if two nodes can be merged (neither is ancestor of the other, have common LCA).
+    """
+    from core.merge_utils import check_merge_eligibility as check_eligibility
+    
+    tree = load_tree(request.conversation_id)
+    
+    node_a = tree.find_node_by_id(request.node_a_id)
+    node_b = tree.find_node_by_id(request.node_b_id)
+    
+    if not node_a:
+        raise HTTPException(status_code=404, detail=f"Node A ({request.node_a_id}) not found")
+    if not node_b:
+        raise HTTPException(status_code=404, detail=f"Node B ({request.node_b_id}) not found")
+    
+    eligibility = check_eligibility(node_a, node_b)
+    return eligibility.to_dict()
+
+
 @app.post("/merge_branches")
 def merge_branches(request: MergeBranchesRequest):
     """
-    Merges a target branch into the current branch (DAG merge).
+    Merges a target branch into the current branch using three-way semantic merge.
+    
+    Returns merged state, conflicts, and provenance information.
     """
     tree = load_tree(request.conversation_id)
     try:
-        tree.merge_branches(request.target_node_id, request.merge_prompt)
+        result = tree.merge_branches(request.target_node_id, request.merge_prompt)
         tree.save_to_db(request.conversation_id)
-        return {"message": "Branches merged successfully", "new_node_id": tree.current_node.id}
+        return {
+            "message": "Branches merged successfully",
+            "new_node_id": result["new_node_id"],
+            "merge_node_id": result["merge_node_id"],
+            "lca_id": result["lca_id"],
+            "conflicts": result["conflicts"],
+            "has_conflicts": result["has_conflicts"],
+            "merged_state": result["merged_state"]
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

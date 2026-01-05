@@ -24,6 +24,7 @@ function App() {
 
   // Selection state
   const [selectedNodeIds, setSelectedNodeIds] = useState([])
+  const [mergeEligibility, setMergeEligibility] = useState(null) // {eligible, rejection_reason, lca_id}
 
   const historyEndRef = useRef(null)
 
@@ -96,7 +97,7 @@ function App() {
       await fetchConversations()
       // Load the new conversation
       await handleSelectConversation(res.data.id)
-    } catch (err) {
+    } catch (_err) {
       alert('Failed to create conversation')
     }
   }
@@ -186,14 +187,50 @@ function App() {
     refresh()
   }, [fetchConversations, refresh])
 
+  // Check merge eligibility when 2 nodes are selected
+  useEffect(() => {
+    const checkEligibility = async () => {
+      if (selectedNodeIds.length === 2 && currentConversationId) {
+        try {
+          const res = await axios.post(`${API_URL}/check_merge_eligibility`, {
+            node_a_id: selectedNodeIds[0],
+            node_b_id: selectedNodeIds[1],
+            conversation_id: currentConversationId
+          })
+          setMergeEligibility(res.data)
+        } catch (err) {
+          console.error("Failed to check merge eligibility", err)
+          setMergeEligibility({ eligible: false, rejection_reason: "check_failed" })
+        }
+      } else {
+        setMergeEligibility(null)
+      }
+    }
+    checkEligibility()
+  }, [selectedNodeIds, currentConversationId])
+
   const sendMessage = async (e) => {
     e.preventDefault()
     if (!input.trim()) return
 
     // CHECK SELECTION FOR MERGE
     if (selectedNodeIds.length === 2) {
+      // Check eligibility first
+      if (!mergeEligibility?.eligible) {
+        const reason = mergeEligibility?.rejection_reason || "unknown"
+        if (reason === "cannot_merge_ancestor_with_descendant") {
+          alert("Cannot merge: one node is an ancestor of the other. Select two divergent branches.")
+        } else if (reason === "cannot_merge_node_with_itself") {
+          alert("Cannot merge a node with itself.")
+        } else if (reason === "no_common_ancestor_found") {
+          alert("Cannot merge: no common ancestor found between these nodes.")
+        } else {
+          alert(`Merge not allowed: ${reason}`)
+        }
+        return
+      }
+
       // MERGE LOGIC
-      // We know we want to merge 2 nodes with this prompt.
       // We need to determine which is 'current' and which is 'target'.
 
       // Check if one of them is the current active node
@@ -207,7 +244,6 @@ function App() {
       } else {
         // Neither is current.
         // Heuristic: We must checkout one of them first.
-        // Let's checkout the first one in list, and merge the second.
         const baseId = selectedNodeIds[0]
         targetId = selectedNodeIds[1]
 
@@ -218,22 +254,30 @@ function App() {
             identifier: baseId,
             conversation_id: currentConversationId
           })
-        } catch (err) {
+        } catch (_err) {
           alert("Failed to auto-checkout base node for merge.")
           return;
         }
       }
 
-      console.log(`Merging ${targetId} into current...`)
+      console.log(`Merging ${targetId} into current... (LCA: ${mergeEligibility?.lca_id})`)
       setLoading(true)
       try {
-        await axios.post(`${API_URL}/merge_branches`, {
+        const res = await axios.post(`${API_URL}/merge_branches`, {
           target_node_id: targetId,
           merge_prompt: input,
           conversation_id: currentConversationId
         })
+
+        // Show conflicts if any
+        if (res.data.has_conflicts) {
+          const conflictCount = res.data.conflicts?.length || 0
+          alert(`Merge completed with ${conflictCount} conflict(s). The AI has been informed and may ask for clarification.`)
+        }
+
         setInput('')
         setSelectedNodeIds([]) // Clear selection
+        setMergeEligibility(null)
         refresh()
       } catch (err) {
         alert("Merge failed: " + (err.response?.data?.detail || err.message))
@@ -474,7 +518,9 @@ function App() {
             disabled={loading || !currentConversationId}
             placeholder={
               selectedNodeIds.length === 2
-                ? "Enter merge prompt to merge selected nodes..."
+                ? (mergeEligibility?.eligible
+                  ? "Enter merge prompt to merge selected nodes..."
+                  : `⚠️ Merge not allowed: ${mergeEligibility?.rejection_reason || 'checking...'}`)
                 : "Type a message..."
             }
             style={{
@@ -485,9 +531,11 @@ function App() {
           />
           <button
             type="submit"
-            disabled={loading || !currentConversationId}
+            disabled={loading || !currentConversationId || (selectedNodeIds.length === 2 && !mergeEligibility?.eligible)}
             style={{
-              backgroundColor: selectedNodeIds.length === 2 ? '#8b5cf6' : '#2563eb'
+              backgroundColor: selectedNodeIds.length === 2
+                ? (mergeEligibility?.eligible ? '#8b5cf6' : '#9ca3af')
+                : '#2563eb'
             }}
           >
             {loading ? '...' : (selectedNodeIds.length === 2 ? 'Merge & Send' : 'Send')}

@@ -93,24 +93,89 @@ class ConversationTree:
         self.current_node = fork_node
         return branch_name
 
-    def merge_branches(self, target_node_id: str, merge_prompt: str) -> None:
+    def merge_branches(self, target_node_id: str, merge_prompt: str) -> dict:
         """
-        Merges the target node's branch into the current branch using a DAG strategy.
+        Merges the target node's branch into the current branch using three-way semantic merge.
+        
+        Performs LCA computation, state summarization, semantic diffing, and conflict detection.
         
         Args:
             target_node_id (str): The ID of the leaf node from the other branch to merge in.
             merge_prompt (str): The user's question or prompt that synthesizes the two branches.
+            
+        Returns:
+            dict: Merge result containing merged_state, conflicts, and new node info.
+            
+        Raises:
+            ValueError: If merge is not allowed (same node, ancestor/descendant, no LCA).
         """
+        from .merge_utils import check_merge_eligibility, get_conversation_segment, MergeRejectionReason
+        from .state_summary import generate_state_summary, StateSummary
+        from .semantic_diff import compute_semantic_diff
+        from .merge_executor import execute_three_way_merge, format_merged_state_for_context
+        
         target_node = self.find_node_by_id(target_node_id)
         if not target_node:
             raise ValueError(f"Target node {target_node_id} not found")
-            
-        if target_node == self.current_node:
-             raise ValueError("Cannot merge a node into itself")
-
-        # Create the Merge Node
-        # It's a User message containing the merge prompt.
-        merge_node = ConversationNode(content=merge_prompt, role="user")
+        
+        # Check merge eligibility
+        eligibility = check_merge_eligibility(self.current_node, target_node)
+        
+        if not eligibility.eligible:
+            if eligibility.rejection_reason == MergeRejectionReason.SAME_NODE:
+                raise ValueError("Cannot merge a node into itself")
+            elif eligibility.rejection_reason == MergeRejectionReason.ANCESTOR_DESCENDANT:
+                raise ValueError("Cannot merge ancestor with descendant - one node is an ancestor of the other")
+            elif eligibility.rejection_reason == MergeRejectionReason.NO_COMMON_ANCESTOR:
+                raise ValueError("Cannot merge - no common ancestor found between nodes")
+            else:
+                raise ValueError("Merge not allowed")
+        
+        lca = eligibility.lca
+        
+        # Get conversation segments
+        segment_to_a = get_conversation_segment(lca, self.current_node)
+        segment_to_b = get_conversation_segment(lca, target_node)
+        segment_to_lca = self._get_history_to_node(lca)
+        
+        # Generate state summaries
+        print("[Merge] Generating state summary for LCA...")
+        summary_lca = generate_state_summary(segment_to_lca, self.api_client)
+        
+        print("[Merge] Generating state summary for branch A (current)...")
+        summary_a = generate_state_summary(segment_to_lca + segment_to_a, self.api_client)
+        
+        print("[Merge] Generating state summary for branch B (target)...")
+        summary_b = generate_state_summary(segment_to_lca + segment_to_b, self.api_client)
+        
+        # Compute semantic diffs
+        print("[Merge] Computing semantic diff A...")
+        diff_a = compute_semantic_diff(summary_lca, summary_a, self.api_client)
+        
+        print("[Merge] Computing semantic diff B...")
+        diff_b = compute_semantic_diff(summary_lca, summary_b, self.api_client)
+        
+        # Execute three-way merge
+        print("[Merge] Executing three-way merge...")
+        merge_result = execute_three_way_merge(summary_lca, diff_a, diff_b, self.api_client)
+        
+        if not merge_result.success:
+            raise ValueError(f"Merge execution failed: {merge_result.error}")
+        
+        # Create the Merge Node with metadata
+        merge_metadata = {
+            "base_id": lca.id,
+            "merged_state": merge_result.merged_state.to_dict(),
+            "conflicts": [c.to_dict() for c in merge_result.conflicts],
+            "provenance": merge_result.provenance.to_dict()
+        }
+        
+        merge_node = ConversationNode(
+            content=merge_prompt, 
+            role="user",
+            node_type="merge",
+            merge_metadata=merge_metadata
+        )
         
         # Parent 1: Current Node (Mainline)
         self.current_node.add_child(merge_node)
@@ -121,9 +186,64 @@ class ConversationTree:
         # Move current pointer
         self.current_node = merge_node
         
-        # Get response handles the context construction
-        response = self.api_client.get_response(merge_prompt, self.get_conversation_history())
+        # Build context for LLM response
+        merged_context = format_merged_state_for_context(merge_result)
+        
+        # Prepare system context for the response
+        context_messages = self.get_conversation_history()
+        
+        # Add merged state as developer context
+        merge_system_msg = f"""You are continuing a conversation after a merge of two branches.
+
+{merged_context}
+
+The user's merge prompt is the message that follows. Consider both branches' context when responding.
+If there are unresolved conflicts, acknowledge them and ask for clarification if needed."""
+        
+        context_messages.insert(0, {"role": "system", "content": merge_system_msg})
+        
+        # Get response
+        response = self.api_client.get_response(merge_prompt, context_messages)
         self.add_message(response, "assistant")
+        
+        return {
+            "success": True,
+            "new_node_id": self.current_node.id,
+            "merge_node_id": merge_node.id,
+            "lca_id": lca.id,
+            "conflicts": [c.to_dict() for c in merge_result.conflicts],
+            "has_conflicts": merge_result.has_conflicts(),
+            "merged_state": merge_result.merged_state.to_dict()
+        }
+    
+    def _get_history_to_node(self, target_node: ConversationNode) -> List[Dict[str, str]]:
+        """
+        Gets conversation history from root to target node.
+        
+        Args:
+            target_node: The node to get history up to.
+            
+        Returns:
+            List of message dicts with role and content.
+        """
+        messages = []
+        
+        # Build path from root to target
+        path = []
+        current = target_node
+        while current:
+            path.append(current)
+            if current.parents:
+                current = current.parents[0]
+            else:
+                break
+        path.reverse()
+        
+        for node in path:
+            if node.role in ("user", "assistant"):
+                messages.append({"role": node.role, "content": node.content})
+        
+        return messages
 
 
 
