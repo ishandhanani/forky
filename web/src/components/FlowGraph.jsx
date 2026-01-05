@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ReactFlow, useNodesState, useEdgesState, Controls, Background, MarkerType, Handle, Position } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
@@ -46,21 +46,20 @@ const truncate = (str, len = 60) => {
     return str.length > len ? str.substring(0, len) + '...' : str;
 };
 
-const TurnNode = ({ data, selected }) => {
+const TurnNode = ({ data }) => {
 
     const isTurn = data.role === 'turn';
     const isSystem = data.role === 'system';
 
     // Style logic
     // If it's a turn, we split it. If it's system/other, we center it.
-    // Selected state border handled by wrapper style if possible, 
-    // but ReactFlow passes 'selected' prop to custom nodes.
+    // Selection now managed manually via data.isSelected
 
     return (
         <div style={{
             width: '100%',
             height: '100%',
-            border: selected ? '2px solid #a855f7' : (data.isCurrent ? '2px solid #ef4444' : '1px solid #334155'),
+            border: data.isSelected ? '2px solid #a855f7' : (data.isCurrent ? '2px solid #ef4444' : '1px solid #334155'),
             borderRadius: '8px',
             backgroundColor: '#1e293b',
             color: '#f1f5f9',
@@ -122,6 +121,7 @@ const nodeTypes = {
 const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [selectedIds, setSelectedIds] = useState([]);
 
     // Transform raw data (flat nodes list) into ReactFlow elements
     useEffect(() => {
@@ -212,6 +212,7 @@ const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
                     initialNodes.push({
                         id: mergedId,
                         type: 'custom',
+                        selectable: false,
                         data: {
                             role: 'turn',
                             userContent: node.content,
@@ -235,6 +236,7 @@ const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
             initialNodes.push({
                 id: node.id,
                 type: 'custom',
+                selectable: false,
                 data: {
                     role: node.role,
                     fullContent: node.content,
@@ -292,10 +294,27 @@ const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
     }, [data, currentId, setNodes, setEdges]);
 
 
-    const handleSelectionChange = useCallback(({ nodes: selectedNodes }) => {
-        const selectedIds = selectedNodes.map(n => n.id);
-        onSelectionChange(selectedIds);
-    }, [onSelectionChange]);
+    // Manual selection handler for Cmd+click
+    const handleNodeClick = useCallback((e, node) => {
+        if (e.metaKey || e.ctrlKey) {
+            // Toggle selection
+            const newSelectedIds = selectedIds.includes(node.id)
+                ? selectedIds.filter(id => id !== node.id)
+                : [...selectedIds, node.id];
+
+            setSelectedIds(newSelectedIds);
+            onSelectionChange(newSelectedIds);
+
+            // Update node visuals
+            setNodes(nds => nds.map(n => ({
+                ...n,
+                data: { ...n.data, isSelected: newSelectedIds.includes(n.id) }
+            })));
+        }
+
+        // Always navigate
+        onNodeClick(e, node.id);
+    }, [selectedIds, onNodeClick, onSelectionChange, setNodes]);
 
     return (
         <div style={{ width: '100%', height: '100%' }}>
@@ -305,8 +324,7 @@ const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
                 nodeTypes={nodeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
-                onNodeClick={(e, node) => onNodeClick(e, node.id)}
-                onSelectionChange={handleSelectionChange}
+                onNodeClick={handleNodeClick}
                 fitView
                 attributionPosition="bottom-left"
                 minZoom={0.1}
