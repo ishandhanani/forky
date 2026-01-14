@@ -158,6 +158,20 @@ def delete_conversation(conversation_id: str):
         return {"message": "Conversation deleted"}
     raise HTTPException(status_code=404, detail="Conversation not found")
 
+
+@app.get("/search")
+def search(q: str = ""):
+    """
+    Performs full-text search across all conversation nodes.
+    
+    Returns matching nodes with conversation context and highlighted snippets.
+    """
+    if not q or not q.strip():
+        return {"results": []}
+    
+    results = db.search_nodes(q.strip())
+    return {"results": results}
+
 @app.get("/tree")
 def get_tree(conversation_id: Optional[str] = None):
     """

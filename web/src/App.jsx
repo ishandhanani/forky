@@ -26,6 +26,11 @@ function App() {
   const [selectedNodeIds, setSelectedNodeIds] = useState([])
   const [mergeEligibility, setMergeEligibility] = useState(null) // {eligible, rejection_reason, lca_id}
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [isSearching, setIsSearching] = useState(false)
+
   const historyEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -151,6 +156,45 @@ function App() {
       console.error("Rename failed", err)
       alert('Failed to rename conversation')
     }
+  }
+
+  // Search functionality
+  const handleSearch = async (query) => {
+    setSearchQuery(query)
+    if (!query.trim()) {
+      setSearchResults([])
+      return
+    }
+    setIsSearching(true)
+    try {
+      const res = await axios.get(`${API_URL}/search?q=${encodeURIComponent(query)}`)
+      setSearchResults(res.data.results || [])
+    } catch (err) {
+      console.error("Search failed", err)
+      setSearchResults([])
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const handleSearchResultClick = async (result) => {
+    // Load the conversation if different
+    if (result.conversation_id !== currentConversationId) {
+      await handleSelectConversation(result.conversation_id)
+    }
+    // Checkout to the node
+    try {
+      await axios.post(`${API_URL}/checkout`, {
+        identifier: result.node_id,
+        conversation_id: result.conversation_id
+      })
+      refresh()
+    } catch (err) {
+      console.error("Checkout failed", err)
+    }
+    // Clear search
+    setSearchQuery('')
+    setSearchResults([])
   }
 
   const fetchGraph = useCallback(async () => {
@@ -401,6 +445,54 @@ function App() {
       {/* Navigation Sidebar */}
       <div className="nav-sidebar">
         <h2>Chats</h2>
+
+        {/* Search Input */}
+        <div className="search-container">
+          <input
+            type="text"
+            className="search-input"
+            placeholder="🔍 Search all chats..."
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+          />
+          {searchQuery && (
+            <span
+              className="search-clear"
+              onClick={() => { setSearchQuery(''); setSearchResults([]); }}
+            >
+              ✕
+            </span>
+          )}
+        </div>
+
+        {/* Search Results */}
+        {searchQuery && (
+          <div className="search-results">
+            {isSearching ? (
+              <div className="search-loading">Searching...</div>
+            ) : searchResults.length > 0 ? (
+              searchResults.map((result, idx) => (
+                <div
+                  key={`${result.node_id}-${idx}`}
+                  className="search-result-item"
+                  onClick={() => handleSearchResultClick(result)}
+                >
+                  <div className="search-result-meta">
+                    <span className="search-result-conv">{result.conversation_name}</span>
+                    <span className={`search-result-role ${result.role}`}>{result.role}</span>
+                  </div>
+                  <div
+                    className="search-result-snippet"
+                    dangerouslySetInnerHTML={{ __html: result.snippet }}
+                  />
+                </div>
+              ))
+            ) : (
+              <div className="search-no-results">No results found</div>
+            )}
+          </div>
+        )}
+
         <ul className="nav-list">
           {conversations.map(conv => (
             <li

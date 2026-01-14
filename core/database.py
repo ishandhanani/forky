@@ -119,6 +119,50 @@ def init_db() -> None:
             ON edges(child_id)
         """)
         
+        # FTS5 virtual table for full-text search (standalone, no external content binding)
+        cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                node_id UNINDEXED,
+                conversation_id UNINDEXED,
+                content,
+                role UNINDEXED
+            )
+        """)
+        
+        # Triggers to keep FTS index in sync with nodes table
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS nodes_fts_ai AFTER INSERT ON nodes BEGIN
+                INSERT INTO nodes_fts(node_id, conversation_id, content, role)
+                VALUES (NEW.id, NEW.conversation_id, NEW.content, NEW.role);
+            END
+        """)
+        
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS nodes_fts_ad AFTER DELETE ON nodes BEGIN
+                DELETE FROM nodes_fts WHERE node_id = OLD.id;
+            END
+        """)
+        
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE ON nodes BEGIN
+                UPDATE nodes_fts SET content = NEW.content, role = NEW.role
+                WHERE node_id = OLD.id;
+            END
+        """)
+        
+        # Populate FTS from existing data if empty
+        cursor.execute("SELECT COUNT(*) FROM nodes_fts")
+        fts_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM nodes")
+        nodes_count = cursor.fetchone()[0]
+        
+        if fts_count == 0 and nodes_count > 0:
+            print("Populating FTS index from existing nodes...")
+            cursor.execute("""
+                INSERT INTO nodes_fts(node_id, conversation_id, content, role)
+                SELECT id, conversation_id, content, role FROM nodes
+            """)
+        
     print("Database initialized successfully.")
 
 
@@ -534,3 +578,53 @@ def delete_node(node_id: str) -> Tuple[bool, Optional[str]]:
         
         return True, actual_parent_id
 
+
+def search_nodes(query: str, limit: int = 50) -> List[Dict]:
+    """
+    Performs full-text search across all conversation nodes.
+    
+    Args:
+        query: The search query string.
+        limit: Maximum number of results to return.
+        
+    Returns:
+        List of matching nodes with conversation context and snippets.
+    """
+    if not query or not query.strip():
+        return []
+    
+    # Escape special FTS5 characters and add prefix matching
+    escaped_query = query.replace('"', '""')
+    search_term = f'"{escaped_query}"*'
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                fts.node_id,
+                fts.conversation_id,
+                c.name as conversation_name,
+                fts.role,
+                snippet(nodes_fts, 2, '<mark>', '</mark>', '...', 32) as snippet,
+                n.timestamp
+            FROM nodes_fts fts
+            JOIN conversations c ON fts.conversation_id = c.id
+            JOIN nodes n ON fts.node_id = n.id
+            WHERE nodes_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+        """, (search_term, limit))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "node_id": row["node_id"],
+                "conversation_id": row["conversation_id"],
+                "conversation_name": row["conversation_name"],
+                "role": row["role"],
+                "snippet": row["snippet"],
+                "timestamp": row["timestamp"]
+            })
+        
+        return results
