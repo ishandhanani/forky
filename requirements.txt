@@ -4,3 +4,5 @@ openai==2.9.0
 fastapi==0.128.0
 uvicorn==0.37.0
 pydantic==2.12.5
+python-multipart>=0.0.6
+PyPDF2>=3.0.0

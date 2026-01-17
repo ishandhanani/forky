@@ -170,6 +170,10 @@ class ConversationTree:
             "provenance": merge_result.provenance.to_dict()
         }
         
+        # Save original branch heads before creating merge node
+        branch_a_head = self.current_node
+        branch_b_head = target_node
+        
         merge_node = ConversationNode(
             content=merge_prompt, 
             role="user",
@@ -202,8 +206,11 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
         
         context_messages.insert(0, {"role": "system", "content": merge_system_msg})
         
-        # Get response
-        response = self.api_client.get_response(merge_prompt, context_messages)
+        # Collect attachments from both branches for multimodal merge
+        merge_attachments = self._collect_branch_attachments(lca, branch_a_head, branch_b_head)
+        
+        # Get response with attachments
+        response = self.api_client.get_response(merge_prompt, context_messages, merge_attachments)
         self.add_message(response, "assistant")
         
         return {
@@ -244,6 +251,76 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
                 messages.append({"role": node.role, "content": node.content})
         
         return messages
+
+    def _collect_branch_attachments(
+        self, 
+        lca: ConversationNode, 
+        node_a: ConversationNode, 
+        node_b: ConversationNode
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Collects all attachments from both branches (from LCA to each node).
+        
+        Prepares them for LLM API call during merge.
+        
+        Args:
+            lca: The lowest common ancestor node.
+            node_a: The current branch head (merge node parent 1).
+            node_b: The target branch head (merge node parent 2).
+            
+        Returns:
+            List of prepared attachments for LLM, or None if no attachments.
+        """
+        from . import attachment_utils
+        
+        # Collect node IDs from LCA to node_a (exclusive of LCA)
+        def get_path_ids(start: ConversationNode, end: ConversationNode) -> List[str]:
+            """Gets all node IDs on path from start to end (exclusive of start)."""
+            path_ids = []
+            current = end
+            while current and current.id != start.id:
+                path_ids.append(current.id)
+                if current.parents:
+                    current = current.parents[0]
+                else:
+                    break
+            return path_ids
+        
+        branch_a_ids = get_path_ids(lca, node_a)
+        branch_b_ids = get_path_ids(lca, node_b)
+        all_node_ids = list(set(branch_a_ids + branch_b_ids))
+        
+        if not all_node_ids:
+            return None
+        
+        # Get all attachments for these nodes
+        attachments_data = db.get_nodes_attachments(all_node_ids)
+        
+        if not attachments_data:
+            return None
+        
+        # Prepare attachments for LLM
+        import os
+        UPLOAD_DIR = ".forky_conversations/uploads"
+        
+        prepared = []
+        for att in attachments_data:
+            filepath = os.path.join(UPLOAD_DIR, att["filename"])
+            if os.path.exists(filepath):
+                result = attachment_utils.prepare_attachment_for_llm(
+                    filepath=filepath,
+                    original_name=att["original_name"],
+                    mime_type=att["mime_type"]
+                )
+                if result:
+                    # Add branch info for context
+                    if att["node_id"] in branch_a_ids:
+                        result["branch"] = "A (current)"
+                    else:
+                        result["branch"] = "B (target)"
+                    prepared.append(result)
+        
+        return prepared if prepared else None
 
 
 
@@ -287,17 +364,24 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
         self.add_message(response, "assistant")
         return response
 
-    def chat_stream(self, message: str, provider: Optional[str] = None, model: Optional[str] = None):
+    def chat_stream(
+        self, 
+        message: str, 
+        provider: Optional[str] = None, 
+        model: Optional[str] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None
+    ):
         """
         Sends a message to the LLM and yields the response as chunks, updating the tree in real-time.
 
         Args:
-            message (str): The user message to send.
-            provider (Optional[str]): The LLM provider (e.g., "anthropic").
-            model (Optional[str]): The specific model version to use.
+            message: The user message to send.
+            provider: The LLM provider (e.g., "anthropic").
+            model: The specific model version to use.
+            attachments: Optional list of prepared attachments [{type, name, mime_type, data}].
         
         Yields:
-             str: Chunks of the LLM response.
+             Chunks of the LLM response.
         """
         if (model and model != self.api_client.model) or (provider and provider != self.api_client.provider):
             self.api_client = APIClient(provider=provider or self.api_client.provider, model=model)
@@ -305,15 +389,22 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
         conversation_history = self.get_conversation_history()
         self.add_message(message, "user")
         
+        # Store user node ID for attachment linking
+        user_node_id = self.current_node.id
+        
         # Create a new empty assistant node
         assistant_node = ConversationNode(content="", role="assistant")
         self.current_node.add_child(assistant_node)
         self.current_node = assistant_node
 
-        # Stream response
-        for chunk in self.api_client.get_response_stream(message, conversation_history):
+        # Stream response with attachments
+        for chunk in self.api_client.get_response_stream(message, conversation_history, attachments):
             assistant_node.content += chunk
             yield chunk
+        
+        # Return the user node ID so caller can link attachments
+        # (This is done by yielding a special marker or the caller tracks it)
+        self._last_user_node_id = user_node_id
 
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """

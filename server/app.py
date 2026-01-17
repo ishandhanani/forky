@@ -1,11 +1,14 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
+import uuid
 from core.conversation_tree import ConversationTree
 from core import database as db
+from core import attachment_utils
 
 app = FastAPI(
     title="Forky API",
@@ -24,6 +27,13 @@ app.add_middleware(
 
 # Provider configuration
 PROVIDER = "openai" 
+
+# Upload directory for attachments
+UPLOAD_DIR = ".forky_conversations/uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Mount static files for serving uploads
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 @app.on_event("startup")
@@ -65,6 +75,7 @@ class MessageRequest(BaseModel):
     conversation_id: str
     provider: Optional[str] = None
     model: Optional[str] = None
+    attachment_ids: Optional[List[str]] = None  # NEW: list of attachment IDs
 
 class CheckoutRequest(BaseModel):
     """Request model for checking out a specific node or branch."""
@@ -98,7 +109,112 @@ class CreateConversationRequest(BaseModel):
     """Request model for creating a new conversation."""
     name: Optional[str] = None
 
-# Endpoints
+
+# --- Attachment Endpoints ---
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    conversation_id: str = Form(...)
+):
+    """
+    Uploads a file attachment.
+    
+    Returns attachment metadata including ID and URL for preview.
+    The attachment is not yet linked to any message node.
+    """
+    # Validate conversation exists
+    if not db.conversation_exists(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Get file info
+    original_name = file.filename or "unknown"
+    content = await file.read()
+    size_bytes = len(content)
+    
+    # Determine MIME type
+    mime_type = file.content_type or attachment_utils.get_mime_type(original_name)
+    
+    # Validate file type
+    if not attachment_utils.is_supported_file(mime_type, original_name):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type: {mime_type}"
+        )
+    
+    # Validate file size
+    is_valid, error_msg = attachment_utils.validate_file_size(size_bytes, mime_type)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Generate unique filename
+    attachment_id = uuid.uuid4().hex[:12]
+    ext = os.path.splitext(original_name)[1].lower()
+    saved_filename = f"{attachment_id}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, saved_filename)
+    
+    # Save file to disk
+    with open(filepath, "wb") as f:
+        f.write(content)
+    
+    # Determine attachment type
+    attachment_type = attachment_utils.get_attachment_type(mime_type, original_name)
+    
+    # Save metadata to database
+    db.save_attachment(
+        attachment_id=attachment_id,
+        conversation_id=conversation_id,
+        filename=saved_filename,
+        original_name=original_name,
+        mime_type=mime_type,
+        attachment_type=attachment_type,
+        size_bytes=size_bytes
+    )
+    
+    return {
+        "attachment_id": attachment_id,
+        "filename": saved_filename,
+        "original_name": original_name,
+        "mime_type": mime_type,
+        "type": attachment_type,
+        "size_bytes": size_bytes,
+        "url": f"/uploads/{saved_filename}"
+    }
+
+
+@app.delete("/attachment/{attachment_id}")
+def delete_attachment(attachment_id: str):
+    """Deletes an unlinked attachment."""
+    attachment = db.get_attachment(attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    
+    # Only allow deleting unlinked attachments
+    if attachment.get("node_id"):
+        raise HTTPException(status_code=400, detail="Cannot delete attached file")
+    
+    # Delete file from disk
+    filepath = os.path.join(UPLOAD_DIR, attachment["filename"])
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    
+    # Delete from database
+    db.delete_attachment(attachment_id)
+    
+    return {"message": "Attachment deleted"}
+
+
+@app.get("/node/{node_id}/attachments")
+def get_node_attachments(node_id: str):
+    """Gets all attachments for a specific message node."""
+    attachments = db.get_node_attachments(node_id)
+    # Add URL to each attachment
+    for att in attachments:
+        att["url"] = f"/uploads/{att['filename']}"
+    return {"attachments": attachments}
+
+
+# --- Conversation Endpoints ---
 
 @app.get("/conversations")
 def list_conversations():
@@ -109,7 +225,6 @@ def list_conversations():
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest):
     """Creates a new empty conversation with an optional name."""
-    import uuid
     conversation_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
     # sanitize
     conversation_id = "".join(c for c in conversation_id if c.isalnum() or c in ('-', '_'))
@@ -223,16 +338,45 @@ def chat(request: MessageRequest):
     Sends a message to the LLM and gets a response.
     
     Updates the conversation tree with the new user message and assistant response.
+    Supports attachments (images, documents) that are passed to the LLM.
     """
     tree = load_tree(request.conversation_id)
     
+    # Prepare attachments for LLM if any
+    prepared_attachments = None
+    attachment_ids = request.attachment_ids or []
+    
+    if attachment_ids:
+        attachments_data = db.get_attachments_by_ids(attachment_ids)
+        prepared_attachments = []
+        
+        for att in attachments_data:
+            filepath = os.path.join(UPLOAD_DIR, att["filename"])
+            prepared = attachment_utils.prepare_attachment_for_llm(
+                filepath=filepath,
+                original_name=att["original_name"],
+                mime_type=att["mime_type"]
+            )
+            if prepared:
+                prepared_attachments.append(prepared)
+    
     async def generate():
         try:
-            for chunk in tree.chat_stream(request.message, provider=request.provider, model=request.model):
+            for chunk in tree.chat_stream(
+                request.message, 
+                provider=request.provider, 
+                model=request.model,
+                attachments=prepared_attachments
+            ):
                 yield chunk
             
             # Save after completion
             tree.save_to_db(request.conversation_id)
+            
+            # Link attachments to the user node
+            if attachment_ids and hasattr(tree, '_last_user_node_id'):
+                db.link_attachments_to_node(attachment_ids, tree._last_user_node_id)
+                
         except Exception as e:
             # In a stream, we can't easily raise HTTP exception once started, 
             # but we can log or yield an error message if caught early.

@@ -31,6 +31,11 @@ function App() {
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
 
+  // Attachment state
+  const [pendingAttachments, setPendingAttachments] = useState([])
+  const [uploadingFiles, setUploadingFiles] = useState(false)
+  const fileInputRef = useRef(null)
+
   const historyEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -253,6 +258,50 @@ function App() {
     checkEligibility()
   }, [selectedNodeIds, currentConversationId])
 
+  // File upload handler
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files)
+    if (!files.length || !currentConversationId) return
+
+    setUploadingFiles(true)
+
+    for (const file of files) {
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('conversation_id', currentConversationId)
+
+        const res = await axios.post(`${API_URL}/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
+
+        setPendingAttachments(prev => [...prev, res.data])
+      } catch (err) {
+        console.error('Failed to upload file:', err)
+        const errorMsg = err.response?.data?.detail || err.message
+        alert(`Failed to upload ${file.name}: ${errorMsg}`)
+      }
+    }
+
+    setUploadingFiles(false)
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // Remove pending attachment
+  const removeAttachment = async (attachmentId) => {
+    try {
+      await axios.delete(`${API_URL}/attachment/${attachmentId}`)
+      setPendingAttachments(prev => prev.filter(a => a.attachment_id !== attachmentId))
+    } catch (err) {
+      console.error('Failed to remove attachment:', err)
+      // Still remove from UI even if server delete fails
+      setPendingAttachments(prev => prev.filter(a => a.attachment_id !== attachmentId))
+    }
+  }
+
   const sendMessage = async (e) => {
     e.preventDefault()
     if (!input.trim()) return
@@ -337,7 +386,10 @@ function App() {
 
     // Optimistic update
     setHistory(prev => [...prev, userMsg, assistantMsgPrefix])
+    const currentInput = input
+    const currentAttachments = pendingAttachments.map(a => a.attachment_id)
     setInput('')
+    setPendingAttachments([]) // Clear attachments
     setLoading(true)
 
     try {
@@ -347,9 +399,10 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          message: input,
+          message: currentInput,
           conversation_id: currentConversationId,
-          model: selectedModel
+          model: selectedModel,
+          attachment_ids: currentAttachments.length > 0 ? currentAttachments : undefined
         })
       })
 
@@ -589,7 +642,54 @@ function App() {
           )}
           <div ref={historyEndRef} />
         </div>
+
+        {/* Attachments Preview */}
+        {pendingAttachments.length > 0 && (
+          <div className="attachments-preview">
+            {pendingAttachments.map(att => (
+              <div key={att.attachment_id} className="attachment-chip">
+                {att.type === 'image' ? (
+                  <img src={`${API_URL}${att.url}`} alt={att.original_name} />
+                ) : (
+                  <span className="attachment-icon">📄</span>
+                )}
+                <span className="attachment-name" title={att.original_name}>
+                  {att.original_name.length > 12 ? att.original_name.substring(0, 12) + '...' : att.original_name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(att.attachment_id)}
+                  className="attachment-remove"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <form onSubmit={sendMessage} className="input-area">
+          {/* Hidden file input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            multiple
+            accept="image/*,.pdf,.txt,.md,.json,.csv,.py,.js,.ts,.jsx,.tsx,.html,.css,.sql,.java,.cpp,.c,.go,.rs,.rb,.php"
+            onChange={handleFileSelect}
+          />
+
+          {/* Attach button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading || !currentConversationId || uploadingFiles}
+            className="attach-button"
+            title="Attach files"
+          >
+            {uploadingFiles ? '⏳' : '📎'}
+          </button>
+
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
@@ -613,11 +713,13 @@ function App() {
                 ? (mergeEligibility?.eligible
                   ? "Enter merge prompt to merge selected nodes..."
                   : `⚠️ Merge not allowed: ${mergeEligibility?.rejection_reason || 'checking...'}`)
-                : "Type a message..."
+                : pendingAttachments.length > 0
+                  ? `${pendingAttachments.length} file(s) attached. Type a message...`
+                  : "Type a message..."
             }
             style={{
-              borderColor: selectedNodeIds.length === 2 ? '#8b5cf6' : '#ccc',
-              borderWidth: selectedNodeIds.length === 2 ? '2px' : '1px'
+              borderColor: selectedNodeIds.length === 2 ? '#8b5cf6' : (pendingAttachments.length > 0 ? '#22c55e' : '#ccc'),
+              borderWidth: selectedNodeIds.length === 2 || pendingAttachments.length > 0 ? '2px' : '1px'
             }}
             autoFocus
           />
