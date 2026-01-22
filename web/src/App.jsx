@@ -621,10 +621,46 @@ function App() {
         <div className="history">
           {history.length > 0 ? (
             history.map((msg, i) => {
-              const isUser = msg.startsWith("User:") || msg.startsWith("user:")
-              const content = msg.replace(/^(User:|System:|Assistant:|user:|system:|assistant:)\s*/, "")
+              // Handle both old string format and new object format
+              const isOldFormat = typeof msg === 'string'
+              const isUser = isOldFormat
+                ? (msg.startsWith("User:") || msg.startsWith("user:"))
+                : msg.role === "user"
+              const content = isOldFormat
+                ? msg.replace(/^(User:|System:|Assistant:|user:|system:|assistant:)\s*/, "")
+                : msg.content
+              const attachments = isOldFormat ? [] : (msg.attachments || [])
+
               return (
-                <div key={i} className={`message ${isUser ? 'user' : 'system'}`}>
+                <div key={isOldFormat ? i : msg.id} className={`message ${isUser ? 'user' : 'system'}`}>
+                  {/* Attachments for user messages */}
+                  {isUser && attachments.length > 0 && (
+                    <div className="message-attachments">
+                      {attachments.map(att => (
+                        <div key={att.id} className="message-attachment">
+                          {att.type === 'image' ? (
+                            <img
+                              src={`${API_URL}${att.url}`}
+                              alt={att.original_name}
+                              onClick={() => window.open(`${API_URL}${att.url}`, '_blank')}
+                            />
+                          ) : (
+                            <a
+                              href={`${API_URL}${att.url}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="document-attachment"
+                            >
+                              <span className="doc-icon">📄</span>
+                              <span className="doc-name">{att.original_name}</span>
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Message content */}
                   {isUser ? (
                     content
                   ) : (

@@ -505,6 +505,25 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
             current = current.parent
         return list(reversed(messages))
 
+    def get_flat_conversation_with_ids(self) -> List[Dict[str, Any]]:
+        """
+        Returns a flat list of message objects with node IDs for the current branch.
+        
+        Each message has: id, role, content.
+        Useful for fetching attachments per node.
+        """
+        messages = []
+        current = self.current_node
+        while current:
+            if current.role != "system" or current.content.startswith("MERGE SUMMARY:"):
+                messages.append({
+                    "id": current.id,
+                    "role": current.role,
+                    "content": current.content
+                })
+            current = current.parent
+        return list(reversed(messages))
+
     def is_in_fork(self) -> bool:
         """
         Checks if the current node is within a forked branch (descendant of a <FORK> node).

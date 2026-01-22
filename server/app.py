@@ -43,6 +43,9 @@ def startup_event():
     migrated = db.migrate_json_to_sqlite()
     if migrated > 0:
         print(f"Migrated {migrated} conversations from JSON to SQLite")
+    
+    # Clean up orphan attachments (older than 1 hour)
+    db.cleanup_orphan_attachments(max_age_hours=1)
 
 
 def load_tree(conversation_id: str = None) -> ConversationTree:
@@ -327,10 +330,40 @@ def get_graph(conversation_id: Optional[str] = None):
 
 @app.get("/history")
 def get_history(conversation_id: Optional[str] = None):
-    """Returns the linear conversation history from the root to the current node."""
+    """
+    Returns the linear conversation history with attachments.
+    
+    Each message includes: id, role, content, attachments[].
+    """
     tree = load_tree(conversation_id)
-    history = tree.get_flat_conversation()
-    return {"history": history}
+    messages = tree.get_flat_conversation_with_ids()
+    
+    # Collect all node IDs to fetch attachments in one query
+    node_ids = [msg["id"] for msg in messages]
+    
+    # Get all attachments for these nodes
+    all_attachments = db.get_nodes_attachments(node_ids)
+    
+    # Group attachments by node_id
+    attachments_by_node = {}
+    for att in all_attachments:
+        node_id = att["node_id"]
+        if node_id not in attachments_by_node:
+            attachments_by_node[node_id] = []
+        attachments_by_node[node_id].append({
+            "id": att["id"],
+            "filename": att["filename"],
+            "original_name": att["original_name"],
+            "mime_type": att["mime_type"],
+            "type": att["attachment_type"],
+            "url": f"/uploads/{att['filename']}"
+        })
+    
+    # Add attachments to messages
+    for msg in messages:
+        msg["attachments"] = attachments_by_node.get(msg["id"], [])
+    
+    return {"history": messages}
 
 @app.post("/chat")
 def chat(request: MessageRequest):

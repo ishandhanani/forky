@@ -598,9 +598,32 @@ def delete_node(node_id: str) -> Tuple[bool, Optional[str]]:
         for del_id in nodes_to_delete:
             cursor.execute("DELETE FROM edges WHERE parent_id = ? OR child_id = ?", (del_id, del_id))
         
+        # Get all attachments for nodes being deleted (before deleting nodes)
+        attachments_to_delete = []
+        for del_id in nodes_to_delete:
+            cursor.execute("SELECT filename FROM attachments WHERE node_id = ?", (del_id,))
+            for row in cursor.fetchall():
+                attachments_to_delete.append(row["filename"])
+        
+        # Delete attachments from database (CASCADE should handle this, but be explicit)
+        for del_id in nodes_to_delete:
+            cursor.execute("DELETE FROM attachments WHERE node_id = ?", (del_id,))
+        
         # Delete the nodes
         for del_id in nodes_to_delete:
             cursor.execute("DELETE FROM nodes WHERE id = ?", (del_id,))
+        
+        # Delete attachment files from disk (after commit in finally block)
+        # We do this outside the transaction to avoid issues
+        import os
+        UPLOAD_DIR = ".forky_conversations/uploads"
+        for filename in attachments_to_delete:
+            filepath = os.path.join(UPLOAD_DIR, filename)
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception as e:
+                print(f"Warning: Failed to delete attachment file {filepath}: {e}")
         
         return True, actual_parent_id
 
@@ -846,3 +869,46 @@ def get_nodes_attachments(node_ids: List[str]) -> List[Dict]:
             ORDER BY created_at
         """, node_ids)
         return [dict(row) for row in cursor.fetchall()]
+
+
+def cleanup_orphan_attachments(max_age_hours: int = 24) -> int:
+    """
+    Cleans up orphan attachments older than max_age_hours.
+    
+    Removes both database records and files from disk.
+    Should be called periodically or at server startup.
+    
+    Args:
+        max_age_hours: Maximum age in hours for orphan attachments.
+        
+    Returns:
+        Number of attachments cleaned up.
+    """
+    orphans = get_orphan_attachments(max_age_hours)
+    
+    if not orphans:
+        return 0
+    
+    UPLOAD_DIR = ".forky_conversations/uploads"
+    cleaned = 0
+    
+    for att in orphans:
+        # Delete file from disk
+        filepath = os.path.join(UPLOAD_DIR, att["filename"])
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            print(f"Warning: Failed to delete orphan file {filepath}: {e}")
+        
+        # Delete from database
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM attachments WHERE id = ?", (att["id"],))
+        
+        cleaned += 1
+    
+    if cleaned > 0:
+        print(f"Cleaned up {cleaned} orphan attachment(s)")
+    
+    return cleaned
