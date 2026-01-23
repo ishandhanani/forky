@@ -297,10 +297,20 @@ const FlowGraph = ({ data, onNodeClick, onSelectionChange, currentId }) => {
     // Manual selection handler for Cmd+click
     const handleNodeClick = useCallback((e, node) => {
         if (e.metaKey || e.ctrlKey) {
-            // Toggle selection
-            const newSelectedIds = selectedIds.includes(node.id)
-                ? selectedIds.filter(id => id !== node.id)
-                : [...selectedIds, node.id];
+            // Toggle selection (max 2 nodes)
+            let newSelectedIds;
+
+            if (selectedIds.includes(node.id)) {
+                // Deselect
+                newSelectedIds = selectedIds.filter(id => id !== node.id);
+            } else if (selectedIds.length < 2) {
+                // Add to selection (only if less than 2 already selected)
+                newSelectedIds = [...selectedIds, node.id];
+            } else {
+                // Already 2 selected, ignore or replace oldest
+                // Option: replace first selected with new one
+                newSelectedIds = [selectedIds[1], node.id];
+            }
 
             setSelectedIds(newSelectedIds);
             onSelectionChange(newSelectedIds);
