@@ -296,6 +296,33 @@ class APIClient:
         print("SUMMARY PROMPT: ", summary_prompt)
         return self.get_response(summary_prompt)
 
+    def generate_title(self, first_message: str) -> str:
+        """
+        Generates a short, descriptive title for a conversation based on the first message.
+        
+        Args:
+            first_message: The first user message in the conversation.
+            
+        Returns:
+            A short title (3-6 words) describing the conversation topic.
+        """
+        prompt = f"""Generate a very short title (3-6 words max) for a conversation that starts with this message. 
+Return ONLY the title, no quotes, no explanation, no punctuation at the end.
+
+Message: {first_message[:500]}"""
+        
+        try:
+            title = self.get_response(prompt, [])
+            # Clean up the title
+            title = title.strip().strip('"\'').strip()
+            # Limit length
+            if len(title) > 50:
+                title = title[:47] + "..."
+            return title if title else "New Chat"
+        except Exception as e:
+            print(f"Error generating title: {e}")
+            return "New Chat"
+
 
 # Backward compatibility alias if needed, but I'll update usage.
 ClaudeClient = APIClient 

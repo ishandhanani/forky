@@ -427,6 +427,9 @@ def chat(request: MessageRequest):
     """
     tree = load_tree(request.conversation_id)
     
+    # Check if this is the first message (for title generation later)
+    is_first_message = len(tree.get_flat_conversation()) <= 1  # Only root node
+    
     # Prepare attachments for LLM if any
     prepared_attachments = []
     validated_attachment_ids = []
@@ -469,6 +472,17 @@ def chat(request: MessageRequest):
             # Link validated attachments to the user node
             if validated_attachment_ids and hasattr(tree, '_last_user_node_id'):
                 db.link_attachments_to_node(validated_attachment_ids, tree._last_user_node_id)
+            
+            # Auto-generate title for first message if conversation has default name
+            if is_first_message and request.conversation_id.startswith("conv-"):
+                try:
+                    from core.api_client import APIClient
+                    api_client = APIClient(provider=request.provider or PROVIDER, model=request.model)
+                    title = api_client.generate_title(request.message)
+                    if title and title != "New Chat":
+                        db.rename_conversation(request.conversation_id, title)
+                except Exception as e:
+                    print(f"Failed to generate title: {e}")
                 
         except Exception as e:
             # In a stream, we can't easily raise HTTP exception once started, 
@@ -477,6 +491,7 @@ def chat(request: MessageRequest):
             yield f"[Error: {str(e)}]"
 
     return StreamingResponse(generate(), media_type="text/plain")
+
 
 @app.post("/checkout")
 def checkout(request: CheckoutRequest):
