@@ -32,7 +32,7 @@ pip install -r requirements.txt
 ```
 
 Create `.env` file:
-```
+```bash
 ANTHROPIC_API_KEY=your_key_here
 OPENAI_API_KEY=your_key_here  # optional
 ```

@@ -132,34 +132,54 @@ async def upload_file(
     
     # Get file info
     original_name = file.filename or "unknown"
-    content = await file.read()
-    size_bytes = len(content)
-    
-    # Determine MIME type
     mime_type = file.content_type or attachment_utils.get_mime_type(original_name)
     
-    # Validate file type
+    # Validate file type early
     if not attachment_utils.is_supported_file(mime_type, original_name):
         raise HTTPException(
             status_code=400, 
             detail=f"Unsupported file type: {mime_type}"
         )
-    
-    # Validate file size
-    is_valid, error_msg = attachment_utils.validate_file_size(size_bytes, mime_type)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error_msg)
-    
-    # Generate unique filename
+
+    # Generate unique filename for streaming
     attachment_id = uuid.uuid4().hex[:12]
     ext = os.path.splitext(original_name)[1].lower()
     saved_filename = f"{attachment_id}{ext}"
     filepath = os.path.join(UPLOAD_DIR, saved_filename)
     
-    # Save file to disk
-    with open(filepath, "wb") as f:
-        f.write(content)
+    size_bytes = 0
+    CHUNK_SIZE = 64 * 1024 # 64KB chunks
     
+    try:
+        # Stream file to disk in chunks
+        with open(filepath, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                
+                f.write(chunk)
+                size_bytes += len(chunk)
+                
+                # Proactive size validation during streaming (optional but good)
+                # For now, we'll validate the final size to match original logic but avoiding full memory load
+        
+        # Validate final file size
+        is_valid, error_msg = attachment_utils.validate_file_size(size_bytes, mime_type)
+        if not is_valid:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            raise HTTPException(status_code=400, detail=error_msg)
+            
+    except Exception as e:
+        # Cleanup on any streaming or processing error
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        if isinstance(e, HTTPException):
+            raise e
+        print(f"Upload error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during upload")
+
     # Determine attachment type
     attachment_type = attachment_utils.get_attachment_type(mime_type, original_name)
     
@@ -382,8 +402,16 @@ def chat(request: MessageRequest):
     if attachment_ids:
         attachments_data = db.get_attachments_by_ids(attachment_ids)
         prepared_attachments = []
+        validated_attachment_ids = []
         
         for att in attachments_data:
+            # Validate ownership: Ensure attachment belongs to the request's conversation
+            if att["conversation_id"] != request.conversation_id:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Unauthorized access: Attachment {att['id']} does not belong to conversation {request.conversation_id}"
+                )
+            
             filepath = os.path.join(UPLOAD_DIR, att["filename"])
             prepared = attachment_utils.prepare_attachment_for_llm(
                 filepath=filepath,
@@ -392,6 +420,7 @@ def chat(request: MessageRequest):
             )
             if prepared:
                 prepared_attachments.append(prepared)
+                validated_attachment_ids.append(att["id"])
     
     async def generate():
         try:
@@ -406,9 +435,9 @@ def chat(request: MessageRequest):
             # Save after completion
             tree.save_to_db(request.conversation_id)
             
-            # Link attachments to the user node
-            if attachment_ids and hasattr(tree, '_last_user_node_id'):
-                db.link_attachments_to_node(attachment_ids, tree._last_user_node_id)
+            # Link validated attachments to the user node
+            if validated_attachment_ids and hasattr(tree, '_last_user_node_id'):
+                db.link_attachments_to_node(validated_attachment_ids, tree._last_user_node_id)
                 
         except Exception as e:
             # In a stream, we can't easily raise HTTP exception once started, 

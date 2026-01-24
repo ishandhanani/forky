@@ -438,9 +438,17 @@ def save_node(conversation_id: str, node_id: str, content: str, role: str,
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO nodes 
+            INSERT INTO nodes 
             (id, conversation_id, content, role, branch_name, timestamp, node_type, merge_metadata, state_summary_cache)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                content = EXCLUDED.content,
+                role = EXCLUDED.role,
+                branch_name = EXCLUDED.branch_name,
+                timestamp = EXCLUDED.timestamp,
+                node_type = EXCLUDED.node_type,
+                merge_metadata = EXCLUDED.merge_metadata,
+                state_summary_cache = EXCLUDED.state_summary_cache
         """, (node_id, conversation_id, content, role, branch_name, ts, node_type, merge_metadata, state_summary_cache))
 
 

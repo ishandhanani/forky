@@ -4,6 +4,7 @@ import './App.css'
 import FlowGraph from './components/FlowGraph'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import DOMPurify from 'dompurify'
 
 
 const API_URL = 'http://localhost:8000'
@@ -271,9 +272,7 @@ function App() {
         formData.append('file', file)
         formData.append('conversation_id', currentConversationId)
 
-        const res = await axios.post(`${API_URL}/upload`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        })
+        const res = await axios.post(`${API_URL}/upload`, formData)
 
         setPendingAttachments(prev => [...prev, res.data])
       } catch (err) {
@@ -536,7 +535,7 @@ function App() {
                   </div>
                   <div
                     className="search-result-snippet"
-                    dangerouslySetInnerHTML={{ __html: result.snippet }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(result.snippet) }}
                   />
                 </div>
               ))
@@ -555,20 +554,24 @@ function App() {
             >
               <span className="nav-item-name" title={conv.name}>{conv.name.length > 18 ? conv.name.substring(0, 18) + '...' : conv.name}</span>
               <span className="nav-item-actions">
-                <span
+                <button
+                  type="button"
                   onClick={(e) => handleRenameConversation(e, conv.id, conv.name)}
-                  style={{ opacity: 0.5, fontSize: '0.8rem', marginRight: '6px', cursor: 'pointer' }}
+                  style={{ opacity: 0.5, fontSize: '0.8rem', marginRight: '6px' }}
                   title="Rename"
+                  aria-label={`Rename conversation: ${conv.name}`}
                 >
                   ✏️
-                </span>
-                <span
+                </button>
+                <button
+                  type="button"
                   onClick={(e) => handleDeleteConversation(e, conv.id)}
-                  style={{ opacity: 0.5, fontSize: '0.8rem', cursor: 'pointer' }}
+                  style={{ opacity: 0.5, fontSize: '0.8rem' }}
                   title="Delete"
+                  aria-label={`Delete conversation: ${conv.name}`}
                 >
                   ✕
-                </span>
+                </button>
               </span>
             </li>
           ))}

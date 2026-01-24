@@ -250,13 +250,23 @@ def execute_simple_merge(
                 b_change="would remove",
                 rationale="A added a fact that B wants to remove"
             ))
+            # Remove from merged_facts (do not keep A's addition)
+            merged_facts.discard(fact)
+            # Strip provenance
+            if fact in provenance.from_a:
+                provenance.from_a.remove(fact)
+            if fact in provenance.from_b:
+                provenance.from_b.remove(fact)
+            if fact in provenance.from_base:
+                provenance.from_base.remove(fact)
         else:
             merged_facts.discard(fact)
     
     for fact in diff_b.added_facts:
-        merged_facts.add(fact)
-        if fact not in diff_a.added_facts:
-            provenance.from_b.append(fact)
+        if fact not in diff_b.removed_facts or fact not in diff_a.added_facts: # Avoid re-adding if it was a conflict
+             merged_facts.add(fact)
+             if fact not in diff_a.added_facts:
+                 provenance.from_b.append(fact)
     
     merged.facts = list(merged_facts)
     provenance.from_base.extend([f for f in base_facts if f in merged_facts and f not in diff_a.added_facts and f not in diff_b.added_facts])
@@ -278,13 +288,23 @@ def execute_simple_merge(
                 b_change="would reverse",
                 rationale="A made a decision that B reverses"
             ))
+            # Remove from merged_decisions (do not keep A's new decision)
+            merged_decisions.discard(dec)
+            # Strip provenance
+            if dec in provenance.from_a:
+                provenance.from_a.remove(dec)
+            if dec in provenance.from_b:
+                provenance.from_b.remove(dec)
+            if dec in provenance.from_base:
+                provenance.from_base.remove(dec)
         else:
             merged_decisions.discard(dec)
     
     for dec in diff_b.new_decisions:
-        merged_decisions.add(dec)
-        if dec not in diff_a.new_decisions:
-            provenance.from_b.append(dec)
+        if dec not in diff_b.reversed_decisions or dec not in diff_a.new_decisions: # Avoid re-adding if it was a conflict
+            merged_decisions.add(dec)
+            if dec not in diff_a.new_decisions:
+                provenance.from_b.append(dec)
     
     merged.decisions = list(merged_decisions)
     
@@ -331,7 +351,23 @@ def execute_simple_merge(
                     b_change=diff_b.definition_changes[term]["to"],
                     rationale="Both branches redefine this term differently"
                 ))
-        merged.definitions[term] = change["to"]
+                # Do not set merged.definitions[term] to either side.
+                # Either restore base definition or delete if it wasn't there
+                if term in base_summary.definitions:
+                    merged.definitions[term] = base_summary.definitions[term]
+                else:
+                    if term in merged.definitions:
+                        del merged.definitions[term]
+                
+                # Strip Related Provenance
+                for p_list in [provenance.from_a, provenance.from_b, provenance.from_base]:
+                    to_remove = [item for item in p_list if f"Definition: {term}" in item or term == item]
+                    for item in to_remove:
+                        p_list.remove(item)
+            else:
+                merged.definitions[term] = change["to"]
+        else:
+            merged.definitions[term] = change["to"]
     
     for term, change in diff_b.definition_changes.items():
         if term not in diff_a.definition_changes:

@@ -209,6 +209,17 @@ If there are unresolved conflicts, acknowledge them and ask for clarification if
         # Collect attachments from both branches for multimodal merge
         merge_attachments = self._collect_branch_attachments(lca, branch_a_head, branch_b_head)
         
+        # De-duplicate: context_messages already contains merge_prompt from the merge node
+        # since get_conversation_history() was called after setting current_node = merge_node.
+        # Remove the duplicate before calling get_response to avoid sending it twice.
+        if context_messages:
+            # Find and remove the last user message if it equals merge_prompt
+            for i in range(len(context_messages) - 1, -1, -1):
+                if context_messages[i].get("role") == "user":
+                    if context_messages[i].get("content") == merge_prompt:
+                        context_messages.pop(i)
+                    break  # Only check the last user message
+        
         # Get response with attachments
         response = self.api_client.get_response(merge_prompt, context_messages, merge_attachments)
         self.add_message(response, "assistant")

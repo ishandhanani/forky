@@ -80,8 +80,30 @@
   opacity: 1;
 }
 
-.nav-item-actions span:hover {
+.nav-item-actions span:hover,
+.nav-item-actions button:hover {
   opacity: 1 !important;
+}
+
+.nav-item-actions button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+  outline: none;
+}
+
+.nav-item-actions button:focus-visible {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--primary);
+  border-radius: 2px;
 }
 
 .nav-actions {
