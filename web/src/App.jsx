@@ -19,7 +19,8 @@ function App() {
   const [history, setHistory] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('claude-4.5-sonnet')
+  const [selectedModel, setSelectedModel] = useState('')
+  const [availableModels, setAvailableModels] = useState([])
   const [sidebarWidth, setSidebarWidth] = useState(450)
   const [isResizing, setIsResizing] = useState(false)
 
@@ -231,11 +232,26 @@ function App() {
     fetchHistory()
   }, [fetchGraph, fetchHistory])
 
+  // Fetch available models
+  const fetchAvailableModels = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_URL}/available_models`)
+      const models = res.data.models || []
+      setAvailableModels(models)
+      if (models.length > 0 && !selectedModel) {
+        setSelectedModel(models[0].id)
+      }
+    } catch (err) {
+      console.error("Failed to fetch available models", err)
+    }
+  }, [selectedModel])
+
   // Initial load
   useEffect(() => {
     fetchConversations()
+    fetchAvailableModels()
     refresh()
-  }, [fetchConversations, refresh])
+  }, [fetchConversations, fetchAvailableModels, refresh])
 
   // Check merge eligibility when 2 nodes are selected
   useEffect(() => {
@@ -732,15 +748,16 @@ function App() {
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            disabled={loading || !currentConversationId}
+            disabled={loading || !currentConversationId || availableModels.length === 0}
             style={{ marginRight: '10px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
           >
-            <option value="claude-4.5-sonnet">Claude Sonnet 4.5</option>
-            <option value="claude-4.5-haiku">Claude Haiku 4.5</option>
-            <option value="claude-4.5-opus">Claude Opus 4.5</option>
-            <option value="gpt-5.2-2025-12-11">gpt-5.2-2025-12-11</option>
-            <option value="gpt-5-mini-2025-08-07">gpt-5-mini-2025-08-07</option>
-            <option value="gpt-5-nano-2025-08-07">gpt-5-nano-2025-08-07</option>
+            {availableModels.length === 0 ? (
+              <option value="">No models available</option>
+            ) : (
+              availableModels.map(model => (
+                <option key={model.id} value={model.id}>{model.name}</option>
+              ))
+            )}
           </select>
           <input
             type="text"

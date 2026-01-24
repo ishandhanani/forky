@@ -263,7 +263,7 @@ def execute_simple_merge(
             merged_facts.discard(fact)
     
     for fact in diff_b.added_facts:
-        if fact not in diff_b.removed_facts or fact not in diff_a.added_facts: # Avoid re-adding if it was a conflict
+        if fact not in diff_b.removed_facts and fact not in diff_a.added_facts: # Avoid re-adding if it was a conflict
              merged_facts.add(fact)
              if fact not in diff_a.added_facts:
                  provenance.from_b.append(fact)
@@ -301,7 +301,7 @@ def execute_simple_merge(
             merged_decisions.discard(dec)
     
     for dec in diff_b.new_decisions:
-        if dec not in diff_b.reversed_decisions or dec not in diff_a.new_decisions: # Avoid re-adding if it was a conflict
+        if dec not in diff_b.reversed_decisions and dec not in diff_a.new_decisions: # Avoid re-adding if it was a conflict
             merged_decisions.add(dec)
             if dec not in diff_a.new_decisions:
                 provenance.from_b.append(dec)

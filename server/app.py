@@ -179,6 +179,8 @@ async def upload_file(
             raise e
         print(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during upload")
+    finally:
+        await file.close()
 
     # Determine attachment type
     attachment_type = attachment_utils.get_attachment_type(mime_type, original_name)
@@ -238,6 +240,36 @@ def get_node_attachments(node_id: str):
 
 
 # --- Conversation Endpoints ---
+
+@app.get("/available_models")
+def get_available_models():
+    """
+    Returns the list of available models based on configured API keys.
+    Only returns models for providers with valid API keys set.
+    """
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    models = []
+    
+    # Check Anthropic models
+    if os.getenv("ANTHROPIC_API_KEY"):
+        models.extend([
+            {"id": "claude-4.5-sonnet", "name": "Claude Sonnet 4.5", "provider": "anthropic"},
+            {"id": "claude-4.5-haiku", "name": "Claude Haiku 4.5", "provider": "anthropic"},
+            {"id": "claude-4.5-opus", "name": "Claude Opus 4.5", "provider": "anthropic"},
+        ])
+    
+    # Check OpenAI models
+    if os.getenv("OPENAI_API_KEY"):
+        models.extend([
+            {"id": "gpt-5.2-2025-12-11", "name": "gpt-5.2-2025-12-11", "provider": "openai"},
+            {"id": "gpt-5-mini-2025-08-07", "name": "gpt-5-mini-2025-08-07", "provider": "openai"},
+            {"id": "gpt-5-nano-2025-08-07", "name": "gpt-5-nano-2025-08-07", "provider": "openai"},
+        ])
+    
+    return {"models": models}
+
 
 @app.get("/conversations")
 def list_conversations():
@@ -396,13 +428,12 @@ def chat(request: MessageRequest):
     tree = load_tree(request.conversation_id)
     
     # Prepare attachments for LLM if any
-    prepared_attachments = None
+    prepared_attachments = []
+    validated_attachment_ids = []
     attachment_ids = request.attachment_ids or []
     
     if attachment_ids:
         attachments_data = db.get_attachments_by_ids(attachment_ids)
-        prepared_attachments = []
-        validated_attachment_ids = []
         
         for att in attachments_data:
             # Validate ownership: Ensure attachment belongs to the request's conversation
