@@ -320,6 +320,10 @@ function App() {
   const sendMessage = async (e) => {
     e.preventDefault()
     if (!input.trim()) return
+    if (uploadingFiles) {
+      alert('Please wait for file uploads to complete before sending.')
+      return
+    }
 
     // CHECK SELECTION FOR MERGE
     if (selectedNodeIds.length === 2) {
@@ -781,7 +785,7 @@ function App() {
           />
           <button
             type="submit"
-            disabled={loading || !currentConversationId || (selectedNodeIds.length === 2 && !mergeEligibility?.eligible)}
+            disabled={loading || uploadingFiles || !currentConversationId || (selectedNodeIds.length === 2 && !mergeEligibility?.eligible)}
             style={{
               backgroundColor: selectedNodeIds.length === 2
                 ? (mergeEligibility?.eligible ? '#8b5cf6' : '#9ca3af')

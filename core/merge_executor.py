@@ -337,41 +337,107 @@ def execute_simple_merge(
     
     # Merge definitions
     merged.definitions = base_summary.definitions.copy()
+    
+    # 1. Apply removals
+    for term in diff_a.removed_definitions:
+        if term in merged.definitions:
+            del merged.definitions[term]
+    for term in diff_b.removed_definitions:
+        if term in merged.definitions:
+            del merged.definitions[term]
+            
+    # 2. Apply additions
     merged.definitions.update(diff_a.new_definitions)
     merged.definitions.update(diff_b.new_definitions)
     
-    # Check for definition conflicts
+    # Check for Add/Add conflicts
+    for term, val_a in diff_a.new_definitions.items():
+        if term in diff_b.new_definitions and val_a != diff_b.new_definitions[term]:
+            conflicts.append(MergeConflict(
+                topic=f"Definition: {term}",
+                base="not present",
+                a_change=val_a,
+                b_change=diff_b.new_definitions[term],
+                rationale="Both branches added this definition differently"
+            ))
+            # Conflict: remove it
+            if term in merged.definitions:
+                del merged.definitions[term]
+    
+    # 3. Check for update conflicts (updates vs updates, updates vs removals)
+    processed_updates = set()
+    
+    # Updates from Diff A
     for term, change in diff_a.definition_changes.items():
+        processed_updates.add(term)
         if term in diff_b.definition_changes:
-            if change["to"] != diff_b.definition_changes[term]["to"]:
+            # Both update
+            change_b = diff_b.definition_changes[term]
+            if change["to"] != change_b["to"]:
                 conflicts.append(MergeConflict(
                     topic=f"Definition: {term}",
                     base=change["from"],
                     a_change=change["to"],
-                    b_change=diff_b.definition_changes[term]["to"],
-                    rationale="Both branches redefine this term differently"
+                    b_change=change_b["to"],
+                    rationale="Both branches redefined this term differently"
                 ))
-                # Do not set merged.definitions[term] to either side.
-                # Either restore base definition or delete if it wasn't there
+                # Restore base or remove
                 if term in base_summary.definitions:
                     merged.definitions[term] = base_summary.definitions[term]
                 else:
                     if term in merged.definitions:
                         del merged.definitions[term]
-                
-                # Strip Related Provenance
-                for p_list in [provenance.from_a, provenance.from_b, provenance.from_base]:
-                    to_remove = [item for item in p_list if f"Definition: {term}" in item or term == item]
-                    for item in to_remove:
-                        p_list.remove(item)
             else:
                 merged.definitions[term] = change["to"]
+        elif term in diff_b.removed_definitions:
+            # A updates, B removes
+            conflicts.append(MergeConflict(
+                topic=f"Definition: {term}",
+                base=change["from"],
+                a_change=change["to"],
+                b_change="removed",
+                rationale="A updated a definition that B removed"
+            ))
+            # Restore base
+            if term in base_summary.definitions:
+                merged.definitions[term] = base_summary.definitions[term]
+        else:
+            # Only A updates
+            merged.definitions[term] = change["to"]
+            
+    # Updates from Diff B (that weren't in A)
+    for term, change in diff_b.definition_changes.items():
+        if term in processed_updates:
+            continue
+            
+        if term in diff_a.removed_definitions:
+            # B updates, A removes
+            conflicts.append(MergeConflict(
+                topic=f"Definition: {term}",
+                base=change["from"],
+                a_change="removed",
+                b_change=change["to"],
+                rationale="B updated a definition that A removed"
+            ))
+            # Restore base
+            if term in base_summary.definitions:
+                merged.definitions[term] = base_summary.definitions[term]
         else:
             merged.definitions[term] = change["to"]
+            
+    # Cleanup provenance for all terms NOT in merged.definitions
+    # This applies to removals from either side and unresolved conflicts.
+    all_known_definition_terms = set(base_summary.definitions.keys()) | \
+                                 set(diff_a.new_definitions.keys()) | \
+                                 set(diff_b.new_definitions.keys())
     
-    for term, change in diff_b.definition_changes.items():
-        if term not in diff_a.definition_changes:
-            merged.definitions[term] = change["to"]
+    for term in all_known_definition_terms:
+        if term not in merged.definitions:
+            for p_list in [provenance.from_a, provenance.from_b, provenance.from_base]:
+                to_remove = [item for item in p_list if f"Definition: {term}" in item or term == item]
+                for item in to_remove:
+                    if item in p_list:
+                        p_list.remove(item)
     
     # Add conflict notes
     if conflicts:

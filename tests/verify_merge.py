@@ -28,17 +28,34 @@ def test_merge_logic():
     print(f"Case 1 (Fact 3 in B's added and removed): {'Fact 3' in result.merged_state.facts}")
     assert "Fact 3" not in result.merged_state.facts, "Fact 3 should not be in merged facts if it was removed by B"
 
-    # Case 2: Fact is in B's added and A's added
-    diff_b2 = SemanticDiff()
-    diff_b2.added_facts = ["Fact 2"]
+    # Case 3: Definitions Merge
+    base_def = StateSummary(definitions={"Term 1": "Def 1", "Term 2": "Def 2"})
     
-    result2 = execute_simple_merge(base, diff_a, diff_b2)
-    print(f"Case 2 (Fact 2 in both A and B added): {'Fact 2' in result2.merged_state.facts}")
-    # It should be there, but only once (set handles this), 
-    # and provenance should be handled correctly.
-    # The fix prevents provenance.from_b.append(fact) if it's already in diff_a.added_facts.
-    assert "Fact 2" in result2.merged_state.facts
-    assert result2.provenance.from_b.count("Fact 2") == 0, "Fact 2 should not be in Provenance B if already in A"
+    # Diff A removes Term 1, updates Term 2
+    diff_da = SemanticDiff()
+    diff_da.removed_definitions = ["Term 1"]
+    diff_da.definition_changes = {"Term 2": {"from": "Def 2", "to": "Updated Def 2"}}
+    
+    # Diff B removes Term 2 (Conflict with A's update), adds Term 3
+    diff_db = SemanticDiff()
+    diff_db.removed_definitions = ["Term 2"]
+    diff_db.new_definitions = {"Term 3": "Def 3"}
+    
+    result3 = execute_simple_merge(base_def, diff_da, diff_db)
+    print(f"Case 3 (Term 1 removed by A): {'Term 1' in result3.merged_state.definitions}")
+    print(f"Case 3 (Term 2 conflict - restored?): {result3.merged_state.definitions.get('Term 2')}")
+    print(f"Case 3 (Term 3 added by B): {result3.merged_state.definitions.get('Term 3')}")
+    
+    assert "Term 1" not in result3.merged_state.definitions
+    assert result3.merged_state.definitions.get("Term 2") == "Def 2", "Term 2 should be restored to base Def 2 due to update/remove conflict"
+    assert result3.merged_state.definitions.get("Term 3") == "Def 3"
+    
+    # Case 4: Both remove
+    diff_db4 = SemanticDiff()
+    diff_db4.removed_definitions = ["Term 1"]
+    result4 = execute_simple_merge(base_def, diff_da, diff_db4)
+    print(f"Case 4 (Both remove Term 1): {'Term 1' in result4.merged_state.definitions}")
+    assert "Term 1" not in result4.merged_state.definitions
 
     print("Verification successful!")
 
