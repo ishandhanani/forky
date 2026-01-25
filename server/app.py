@@ -6,9 +6,13 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
 import uuid
+from dotenv import load_dotenv
 from core.conversation_tree import ConversationTree
 from core import database as db
 from core import attachment_utils
+
+# Load environment variables at module import
+load_dotenv()
 
 app = FastAPI(
     title="Forky API",
@@ -247,25 +251,22 @@ def get_available_models():
     Returns the list of available models based on configured API keys.
     Only returns models for providers with valid API keys set.
     """
-    from dotenv import load_dotenv
-    load_dotenv()
-    
     models = []
     
     # Check Anthropic models
     if os.getenv("ANTHROPIC_API_KEY"):
         models.extend([
-            {"id": "claude-4.5-sonnet", "name": "Claude Sonnet 4.5", "provider": "anthropic"},
-            {"id": "claude-4.5-haiku", "name": "Claude Haiku 4.5", "provider": "anthropic"},
-            {"id": "claude-4.5-opus", "name": "Claude Opus 4.5", "provider": "anthropic"},
+            {"id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "provider": "anthropic"},
+            {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "provider": "anthropic"},
+            {"id": "claude-opus-4-5", "name": "Claude Opus 4.5", "provider": "anthropic"},
         ])
     
     # Check OpenAI models
     if os.getenv("OPENAI_API_KEY"):
         models.extend([
-            {"id": "gpt-5.2-2025-12-11", "name": "gpt-5.2-2025-12-11", "provider": "openai"},
-            {"id": "gpt-5-mini-2025-08-07", "name": "gpt-5-mini-2025-08-07", "provider": "openai"},
-            {"id": "gpt-5-nano-2025-08-07", "name": "gpt-5-nano-2025-08-07", "provider": "openai"},
+            {"id": "gpt-5", "name": "GPT-5", "provider": "openai"},
+            {"id": "gpt-5-mini", "name": "GPT-5 Mini", "provider": "openai"},
+            {"id": "gpt-5-nano", "name": "GPT-5 Nano", "provider": "openai"},
         ])
     
     return {"models": models}
