@@ -13,6 +13,7 @@
     "@xyflow/react": "^12.10.0",
     "axios": "^1.13.2",
     "dagre": "^0.8.5",
+    "dompurify": "^3.3.1",
     "react": "^19.2.0",
     "react-d3-tree": "^3.6.6",
     "react-dom": "^19.2.0",

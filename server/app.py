@@ -1,11 +1,18 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
+import uuid
+from dotenv import load_dotenv
 from core.conversation_tree import ConversationTree
 from core import database as db
+from core import attachment_utils
+
+# Load environment variables at module import
+load_dotenv()
 
 app = FastAPI(
     title="Forky API",
@@ -25,6 +32,13 @@ app.add_middleware(
 # Provider configuration
 PROVIDER = "openai" 
 
+# Upload directory for attachments
+UPLOAD_DIR = ".forky_conversations/uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Mount static files for serving uploads
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 
 @app.on_event("startup")
 def startup_event():
@@ -33,6 +47,9 @@ def startup_event():
     migrated = db.migrate_json_to_sqlite()
     if migrated > 0:
         print(f"Migrated {migrated} conversations from JSON to SQLite")
+    
+    # Clean up orphan attachments (older than 1 hour)
+    db.cleanup_orphan_attachments(max_age_hours=1)
 
 
 def load_tree(conversation_id: str = None) -> ConversationTree:
@@ -65,6 +82,7 @@ class MessageRequest(BaseModel):
     conversation_id: str
     provider: Optional[str] = None
     model: Optional[str] = None
+    attachment_ids: Optional[List[str]] = None  # NEW: list of attachment IDs
 
 class CheckoutRequest(BaseModel):
     """Request model for checking out a specific node or branch."""
@@ -98,7 +116,161 @@ class CreateConversationRequest(BaseModel):
     """Request model for creating a new conversation."""
     name: Optional[str] = None
 
-# Endpoints
+
+# --- Attachment Endpoints ---
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    conversation_id: str = Form(...)
+):
+    """
+    Uploads a file attachment.
+    
+    Returns attachment metadata including ID and URL for preview.
+    The attachment is not yet linked to any message node.
+    """
+    # Validate conversation exists
+    if not db.conversation_exists(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Get file info
+    original_name = file.filename or "unknown"
+    mime_type = file.content_type or attachment_utils.get_mime_type(original_name)
+    
+    # Validate file type early
+    if not attachment_utils.is_supported_file(mime_type, original_name):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type: {mime_type}"
+        )
+
+    # Generate unique filename for streaming
+    attachment_id = uuid.uuid4().hex[:12]
+    ext = os.path.splitext(original_name)[1].lower()
+    saved_filename = f"{attachment_id}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, saved_filename)
+    
+    size_bytes = 0
+    CHUNK_SIZE = 64 * 1024 # 64KB chunks
+    
+    try:
+        # Stream file to disk in chunks
+        with open(filepath, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                
+                f.write(chunk)
+                size_bytes += len(chunk)
+                
+                # Proactive size validation during streaming (optional but good)
+                # For now, we'll validate the final size to match original logic but avoiding full memory load
+        
+        # Validate final file size
+        is_valid, error_msg = attachment_utils.validate_file_size(size_bytes, mime_type)
+        if not is_valid:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            raise HTTPException(status_code=400, detail=error_msg)
+            
+    except Exception as e:
+        # Cleanup on any streaming or processing error
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        if isinstance(e, HTTPException):
+            raise e
+        print(f"Upload error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during upload")
+    finally:
+        await file.close()
+
+    # Determine attachment type
+    attachment_type = attachment_utils.get_attachment_type(mime_type, original_name)
+    
+    # Save metadata to database
+    db.save_attachment(
+        attachment_id=attachment_id,
+        conversation_id=conversation_id,
+        filename=saved_filename,
+        original_name=original_name,
+        mime_type=mime_type,
+        attachment_type=attachment_type,
+        size_bytes=size_bytes
+    )
+    
+    return {
+        "attachment_id": attachment_id,
+        "filename": saved_filename,
+        "original_name": original_name,
+        "mime_type": mime_type,
+        "type": attachment_type,
+        "size_bytes": size_bytes,
+        "url": f"/uploads/{saved_filename}"
+    }
+
+
+@app.delete("/attachment/{attachment_id}")
+def delete_attachment(attachment_id: str):
+    """Deletes an unlinked attachment."""
+    attachment = db.get_attachment(attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    
+    # Only allow deleting unlinked attachments
+    if attachment.get("node_id"):
+        raise HTTPException(status_code=400, detail="Cannot delete attached file")
+    
+    # Delete file from disk
+    filepath = os.path.join(UPLOAD_DIR, attachment["filename"])
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    
+    # Delete from database
+    db.delete_attachment(attachment_id)
+    
+    return {"message": "Attachment deleted"}
+
+
+@app.get("/node/{node_id}/attachments")
+def get_node_attachments(node_id: str):
+    """Gets all attachments for a specific message node."""
+    attachments = db.get_node_attachments(node_id)
+    # Add URL to each attachment
+    for att in attachments:
+        att["url"] = f"/uploads/{att['filename']}"
+    return {"attachments": attachments}
+
+
+# --- Conversation Endpoints ---
+
+@app.get("/available_models")
+def get_available_models():
+    """
+    Returns the list of available models based on configured API keys.
+    Only returns models for providers with valid API keys set.
+    """
+    models = []
+    
+    # Check Anthropic models
+    if os.getenv("ANTHROPIC_API_KEY"):
+        models.extend([
+            {"id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "provider": "anthropic"},
+            {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "provider": "anthropic"},
+            {"id": "claude-opus-4-5", "name": "Claude Opus 4.5", "provider": "anthropic"},
+        ])
+    
+    # Check OpenAI models
+    if os.getenv("OPENAI_API_KEY"):
+        models.extend([
+            {"id": "gpt-5", "name": "GPT-5", "provider": "openai"},
+            {"id": "gpt-5-mini", "name": "GPT-5 Mini", "provider": "openai"},
+            {"id": "gpt-5-nano", "name": "GPT-5 Nano", "provider": "openai"},
+        ])
+    
+    return {"models": models}
+
 
 @app.get("/conversations")
 def list_conversations():
@@ -109,7 +281,6 @@ def list_conversations():
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest):
     """Creates a new empty conversation with an optional name."""
-    import uuid
     conversation_id = request.name or f"conv-{uuid.uuid4().hex[:8]}"
     # sanitize
     conversation_id = "".join(c for c in conversation_id if c.isalnum() or c in ('-', '_'))
@@ -158,6 +329,20 @@ def delete_conversation(conversation_id: str):
         return {"message": "Conversation deleted"}
     raise HTTPException(status_code=404, detail="Conversation not found")
 
+
+@app.get("/search")
+def search(q: str = ""):
+    """
+    Performs full-text search across all conversation nodes.
+    
+    Returns matching nodes with conversation context and highlighted snippets.
+    """
+    if not q or not q.strip():
+        return {"results": []}
+    
+    results = db.search_nodes(q.strip())
+    return {"results": results}
+
 @app.get("/tree")
 def get_tree(conversation_id: Optional[str] = None):
     """
@@ -198,10 +383,40 @@ def get_graph(conversation_id: Optional[str] = None):
 
 @app.get("/history")
 def get_history(conversation_id: Optional[str] = None):
-    """Returns the linear conversation history from the root to the current node."""
+    """
+    Returns the linear conversation history with attachments.
+    
+    Each message includes: id, role, content, attachments[].
+    """
     tree = load_tree(conversation_id)
-    history = tree.get_flat_conversation()
-    return {"history": history}
+    messages = tree.get_flat_conversation_with_ids()
+    
+    # Collect all node IDs to fetch attachments in one query
+    node_ids = [msg["id"] for msg in messages]
+    
+    # Get all attachments for these nodes
+    all_attachments = db.get_nodes_attachments(node_ids)
+    
+    # Group attachments by node_id
+    attachments_by_node = {}
+    for att in all_attachments:
+        node_id = att["node_id"]
+        if node_id not in attachments_by_node:
+            attachments_by_node[node_id] = []
+        attachments_by_node[node_id].append({
+            "id": att["id"],
+            "filename": att["filename"],
+            "original_name": att["original_name"],
+            "mime_type": att["mime_type"],
+            "type": att["attachment_type"],
+            "url": f"/uploads/{att['filename']}"
+        })
+    
+    # Add attachments to messages
+    for msg in messages:
+        msg["attachments"] = attachments_by_node.get(msg["id"], [])
+    
+    return {"history": messages}
 
 @app.post("/chat")
 def chat(request: MessageRequest):
@@ -209,16 +424,67 @@ def chat(request: MessageRequest):
     Sends a message to the LLM and gets a response.
     
     Updates the conversation tree with the new user message and assistant response.
+    Supports attachments (images, documents) that are passed to the LLM.
     """
     tree = load_tree(request.conversation_id)
     
+    # Check if this is the first message (for title generation later)
+    is_first_message = len(tree.get_flat_conversation()) <= 1  # Only root node
+    
+    # Prepare attachments for LLM if any
+    prepared_attachments = []
+    validated_attachment_ids = []
+    attachment_ids = request.attachment_ids or []
+    
+    if attachment_ids:
+        attachments_data = db.get_attachments_by_ids(attachment_ids)
+        
+        for att in attachments_data:
+            # Validate ownership: Ensure attachment belongs to the request's conversation
+            if att["conversation_id"] != request.conversation_id:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Unauthorized access: Attachment {att['id']} does not belong to conversation {request.conversation_id}"
+                )
+            
+            filepath = os.path.join(UPLOAD_DIR, att["filename"])
+            prepared = attachment_utils.prepare_attachment_for_llm(
+                filepath=filepath,
+                original_name=att["original_name"],
+                mime_type=att["mime_type"]
+            )
+            if prepared:
+                prepared_attachments.append(prepared)
+                validated_attachment_ids.append(att["id"])
+    
     async def generate():
         try:
-            for chunk in tree.chat_stream(request.message, provider=request.provider, model=request.model):
+            for chunk in tree.chat_stream(
+                request.message, 
+                provider=request.provider, 
+                model=request.model,
+                attachments=prepared_attachments
+            ):
                 yield chunk
             
             # Save after completion
             tree.save_to_db(request.conversation_id)
+            
+            # Link validated attachments to the user node
+            if validated_attachment_ids and hasattr(tree, '_last_user_node_id'):
+                db.link_attachments_to_node(validated_attachment_ids, tree._last_user_node_id)
+            
+            # Auto-generate title for first message if conversation has default name
+            if is_first_message and request.conversation_id.startswith("conv-"):
+                try:
+                    from core.api_client import APIClient
+                    api_client = APIClient(provider=request.provider or PROVIDER, model=request.model)
+                    title = api_client.generate_title(request.message)
+                    if title and title != "New Chat":
+                        db.rename_conversation(request.conversation_id, title)
+                except Exception as e:
+                    print(f"Failed to generate title: {e}")
+                
         except Exception as e:
             # In a stream, we can't easily raise HTTP exception once started, 
             # but we can log or yield an error message if caught early.
@@ -226,6 +492,7 @@ def chat(request: MessageRequest):
             yield f"[Error: {str(e)}]"
 
     return StreamingResponse(generate(), media_type="text/plain")
+
 
 @app.post("/checkout")
 def checkout(request: CheckoutRequest):

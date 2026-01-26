@@ -257,6 +257,10 @@ def get_conversation_segment(from_node: ConversationNode, to_node: ConversationN
     if not path:
         return []
     
+    # get_path_to_ancestor returns path in descendant -> ancestor order.
+    # We want chronological order: ancestor -> descendant.
+    path.reverse()
+    
     messages = []
     for node in path:
         if node.role in ("user", "assistant"):

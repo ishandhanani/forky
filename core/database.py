@@ -119,6 +119,76 @@ def init_db() -> None:
             ON edges(child_id)
         """)
         
+        # FTS5 virtual table for full-text search (standalone, no external content binding)
+        cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                node_id UNINDEXED,
+                conversation_id UNINDEXED,
+                content,
+                role UNINDEXED
+            )
+        """)
+        
+        # Triggers to keep FTS index in sync with nodes table
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS nodes_fts_ai AFTER INSERT ON nodes BEGIN
+                INSERT INTO nodes_fts(node_id, conversation_id, content, role)
+                VALUES (NEW.id, NEW.conversation_id, NEW.content, NEW.role);
+            END
+        """)
+        
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS nodes_fts_ad AFTER DELETE ON nodes BEGIN
+                DELETE FROM nodes_fts WHERE node_id = OLD.id;
+            END
+        """)
+        
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE ON nodes BEGIN
+                UPDATE nodes_fts SET content = NEW.content, role = NEW.role
+                WHERE node_id = OLD.id;
+            END
+        """)
+        
+        # Populate FTS from existing data if empty
+        cursor.execute("SELECT COUNT(*) FROM nodes_fts")
+        fts_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM nodes")
+        nodes_count = cursor.fetchone()[0]
+        
+        if fts_count == 0 and nodes_count > 0:
+            print("Populating FTS index from existing nodes...")
+            cursor.execute("""
+                INSERT INTO nodes_fts(node_id, conversation_id, content, role)
+                SELECT id, conversation_id, content, role FROM nodes
+            """)
+        
+        # Attachments table for file uploads
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                node_id TEXT,
+                conversation_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size_bytes INTEGER,
+                attachment_type TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_attachments_node 
+            ON attachments(node_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_attachments_conversation 
+            ON attachments(conversation_id)
+        """)
+        
     print("Database initialized successfully.")
 
 
@@ -368,9 +438,17 @@ def save_node(conversation_id: str, node_id: str, content: str, role: str,
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO nodes 
+            INSERT INTO nodes 
             (id, conversation_id, content, role, branch_name, timestamp, node_type, merge_metadata, state_summary_cache)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                content = EXCLUDED.content,
+                role = EXCLUDED.role,
+                branch_name = EXCLUDED.branch_name,
+                timestamp = EXCLUDED.timestamp,
+                node_type = EXCLUDED.node_type,
+                merge_metadata = EXCLUDED.merge_metadata,
+                state_summary_cache = EXCLUDED.state_summary_cache
         """, (node_id, conversation_id, content, role, branch_name, ts, node_type, merge_metadata, state_summary_cache))
 
 
@@ -528,9 +606,317 @@ def delete_node(node_id: str) -> Tuple[bool, Optional[str]]:
         for del_id in nodes_to_delete:
             cursor.execute("DELETE FROM edges WHERE parent_id = ? OR child_id = ?", (del_id, del_id))
         
+        # Get all attachments for nodes being deleted (before deleting nodes)
+        attachments_to_delete = []
+        for del_id in nodes_to_delete:
+            cursor.execute("SELECT filename FROM attachments WHERE node_id = ?", (del_id,))
+            for row in cursor.fetchall():
+                attachments_to_delete.append(row["filename"])
+        
+        # Delete attachments from database (CASCADE should handle this, but be explicit)
+        for del_id in nodes_to_delete:
+            cursor.execute("DELETE FROM attachments WHERE node_id = ?", (del_id,))
+        
         # Delete the nodes
         for del_id in nodes_to_delete:
             cursor.execute("DELETE FROM nodes WHERE id = ?", (del_id,))
         
+        # Delete attachment files from disk (after commit in finally block)
+        # We do this outside the transaction to avoid issues
+        import os
+        UPLOAD_DIR = ".forky_conversations/uploads"
+        for filename in attachments_to_delete:
+            filepath = os.path.join(UPLOAD_DIR, filename)
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception as e:
+                print(f"Warning: Failed to delete attachment file {filepath}: {e}")
+        
         return True, actual_parent_id
 
+
+def search_nodes(query: str, limit: int = 50) -> List[Dict]:
+    """
+    Performs full-text search across all conversation nodes.
+    
+    Args:
+        query: The search query string.
+        limit: Maximum number of results to return.
+        
+    Returns:
+        List of matching nodes with conversation context and snippets.
+    """
+    if not query or not query.strip():
+        return []
+    
+    # Escape special FTS5 characters and add prefix matching
+    escaped_query = query.replace('"', '""')
+    search_term = f'"{escaped_query}"*'
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                fts.node_id,
+                fts.conversation_id,
+                c.name as conversation_name,
+                fts.role,
+                snippet(nodes_fts, 2, '<mark>', '</mark>', '...', 32) as snippet,
+                n.timestamp
+            FROM nodes_fts fts
+            JOIN conversations c ON fts.conversation_id = c.id
+            JOIN nodes n ON fts.node_id = n.id
+            WHERE nodes_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+        """, (search_term, limit))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "node_id": row["node_id"],
+                "conversation_id": row["conversation_id"],
+                "conversation_name": row["conversation_name"],
+                "role": row["role"],
+                "snippet": row["snippet"],
+                "timestamp": row["timestamp"]
+            })
+        
+        return results
+
+
+# --- Attachment Operations ---
+
+def save_attachment(
+    attachment_id: str,
+    conversation_id: str,
+    filename: str,
+    original_name: str,
+    mime_type: str,
+    attachment_type: str,
+    size_bytes: int,
+    node_id: Optional[str] = None
+) -> None:
+    """
+    Saves attachment metadata to the database.
+    
+    Args:
+        attachment_id: Unique identifier for the attachment.
+        conversation_id: The parent conversation.
+        filename: Saved filename (e.g., uuid.ext).
+        original_name: Original filename from upload.
+        mime_type: MIME type of the file.
+        attachment_type: 'image' or 'document'.
+        size_bytes: File size in bytes.
+        node_id: Optional node ID (linked after message is sent).
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO attachments 
+            (id, conversation_id, node_id, filename, original_name, mime_type, attachment_type, size_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (attachment_id, conversation_id, node_id, filename, original_name, 
+              mime_type, attachment_type, size_bytes))
+
+
+def get_attachment(attachment_id: str) -> Optional[Dict]:
+    """
+    Gets a single attachment by ID.
+    
+    Args:
+        attachment_id: The attachment ID.
+        
+    Returns:
+        Attachment dict or None if not found.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, conversation_id, node_id, filename, original_name, 
+                   mime_type, attachment_type, size_bytes, created_at
+            FROM attachments WHERE id = ?
+        """, (attachment_id,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+
+
+def get_attachments_by_ids(attachment_ids: List[str]) -> List[Dict]:
+    """
+    Gets multiple attachments by their IDs.
+    
+    Args:
+        attachment_ids: List of attachment IDs.
+        
+    Returns:
+        List of attachment dicts.
+    """
+    if not attachment_ids:
+        return []
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(attachment_ids))
+        cursor.execute(f"""
+            SELECT id, conversation_id, node_id, filename, original_name, 
+                   mime_type, attachment_type, size_bytes, created_at
+            FROM attachments WHERE id IN ({placeholders})
+        """, attachment_ids)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_node_attachments(node_id: str) -> List[Dict]:
+    """
+    Gets all attachments for a specific node.
+    
+    Args:
+        node_id: The node ID.
+        
+    Returns:
+        List of attachment dicts.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, conversation_id, node_id, filename, original_name, 
+                   mime_type, attachment_type, size_bytes, created_at
+            FROM attachments WHERE node_id = ?
+        """, (node_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def link_attachments_to_node(attachment_ids: List[str], node_id: str) -> int:
+    """
+    Links pending attachments to a node after message creation.
+    
+    Args:
+        attachment_ids: List of attachment IDs to link.
+        node_id: The node ID to link them to.
+        
+    Returns:
+        Number of attachments linked.
+    """
+    if not attachment_ids:
+        return 0
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(attachment_ids))
+        cursor.execute(f"""
+            UPDATE attachments SET node_id = ?
+            WHERE id IN ({placeholders}) AND node_id IS NULL
+        """, [node_id] + attachment_ids)
+        return cursor.rowcount
+
+
+def delete_attachment(attachment_id: str) -> bool:
+    """
+    Deletes an attachment from the database.
+    
+    Args:
+        attachment_id: The attachment ID to delete.
+        
+    Returns:
+        True if deleted, False if not found.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+        return cursor.rowcount > 0
+
+
+def get_orphan_attachments(max_age_hours: int = 24) -> List[Dict]:
+    """
+    Gets attachments that are not linked to any node and older than max_age_hours.
+    These can be safely deleted as cleanup.
+    
+    Args:
+        max_age_hours: Maximum age in hours for orphan attachments.
+        
+    Returns:
+        List of orphan attachment dicts.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, conversation_id, filename, original_name, mime_type, 
+                   attachment_type, size_bytes, created_at
+            FROM attachments 
+            WHERE node_id IS NULL 
+            AND created_at < datetime('now', ? || ' hours')
+        """, (f"-{max_age_hours}",))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_nodes_attachments(node_ids: List[str]) -> List[Dict]:
+    """
+    Gets all attachments for a list of node IDs.
+    
+    Useful for collecting all attachments from a branch for merge.
+    
+    Args:
+        node_ids: List of node IDs to get attachments for.
+        
+    Returns:
+        List of attachment dicts with node_id included.
+    """
+    if not node_ids:
+        return []
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(node_ids))
+        cursor.execute(f"""
+            SELECT id, conversation_id, node_id, filename, original_name, 
+                   mime_type, attachment_type, size_bytes, created_at
+            FROM attachments WHERE node_id IN ({placeholders})
+            ORDER BY created_at
+        """, node_ids)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def cleanup_orphan_attachments(max_age_hours: int = 24) -> int:
+    """
+    Cleans up orphan attachments older than max_age_hours.
+    
+    Removes both database records and files from disk.
+    Should be called periodically or at server startup.
+    
+    Args:
+        max_age_hours: Maximum age in hours for orphan attachments.
+        
+    Returns:
+        Number of attachments cleaned up.
+    """
+    orphans = get_orphan_attachments(max_age_hours)
+    
+    if not orphans:
+        return 0
+    
+    UPLOAD_DIR = ".forky_conversations/uploads"
+    cleaned = 0
+    
+    for att in orphans:
+        # Delete file from disk
+        filepath = os.path.join(UPLOAD_DIR, att["filename"])
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            print(f"Warning: Failed to delete orphan file {filepath}: {e}")
+        
+        # Delete from database
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM attachments WHERE id = ?", (att["id"],))
+        
+        cleaned += 1
+    
+    if cleaned > 0:
+        print(f"Cleaned up {cleaned} orphan attachment(s)")
+    
+    return cleaned
